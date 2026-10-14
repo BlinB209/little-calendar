@@ -1,6 +1,8 @@
 # 小日历 · 基础预览版
 
-Windows：打开 `dist/小日历.exe` 即可运行，不需要安装 Python。
+安装包下载：[v0.1.1 预览版](https://github.com/BlinB209/little-calendar/releases/tag/v0.1.1)。
+
+Windows：下载 `little-calendar-windows.exe` 后双击即可运行，不需要安装 Python。本地构建输出为 `dist/小日历.exe`。
 
 - 读取本地时间，支持 2020 至 2030 年，月视图补齐相邻月份日期。
 - 可同时显示 1 至 3 个月，并切换横向或纵向排列；窗口可调整大小。
@@ -11,7 +13,7 @@ Windows：打开 `dist/小日历.exe` 即可运行，不需要安装 Python。
 
 当前为预览版本：尚未提供橡皮擦、自定义颜色和导入导出。
 
-Ubuntu 安装包：`dist/little-calendar_0.1.1_all.deb`，详细安装与验证状态见 `UBUNTU.md`。
+Ubuntu：在发布页下载 `little-calendar_0.1.1_all.deb`，运行 `sudo apt install ./little-calendar_0.1.1_all.deb`，详细安装与验证状态见 [UBUNTU.md](UBUNTU.md)。
 
 ## 源码运行
 
