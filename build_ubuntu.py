@@ -1,0 +1,85 @@
+"""Build an architecture-independent Debian package using standard Python.
+
+No native binaries are cross-compiled: Ubuntu provides Python and Qt via apt.
+"""
+import gzip
+import hashlib
+import io
+from pathlib import Path
+import tarfile
+
+ROOT = Path(__file__).resolve().parent
+VERSION = '0.1.1'
+OUTPUT = ROOT / 'dist' / f'little-calendar_{VERSION}_all.deb'
+
+
+def tar_gz(files):
+    output = io.BytesIO()
+    with tarfile.open(fileobj=output, mode='w', format=tarfile.GNU_FORMAT) as archive:
+        for name, content, mode in files:
+            info = tarfile.TarInfo('./' + name)
+            info.size, info.mode, info.mtime = len(content), mode, 0
+            info.uid = info.gid = 0
+            info.uname = info.gname = 'root'
+            archive.addfile(info, io.BytesIO(content))
+    return gzip.compress(output.getvalue(), mtime=0)
+
+
+def ar_member(name, content):
+    header = f'{name + "/":<16}{0:<12}{0:<6}{0:<6}{"100644":<8}{len(content):<10}`\n'.encode('ascii')
+    assert len(header) == 60
+    return header + content + (b'\n' if len(content) % 2 else b'')
+
+
+def build():
+    files = [
+        ('usr/bin/little-calendar', b'#!/bin/sh\nexec /usr/bin/python3 /usr/share/little-calendar/app.py "$@"\n', 0o755),
+        ('usr/share/little-calendar/app.py', (ROOT / 'app.py').read_bytes(), 0o644),
+        ('usr/share/applications/little-calendar.desktop', (ROOT / 'packaging/little-calendar.desktop').read_bytes(), 0o644),
+        ('usr/share/icons/hicolor/scalable/apps/little-calendar.svg', (ROOT / 'packaging/little-calendar.svg').read_bytes(), 0o644),
+        ('usr/share/doc/little-calendar/README.md', (ROOT / 'UBUNTU.md').read_bytes(), 0o644),
+    ]
+    size = (sum(len(content) for _, content, _ in files) + 1023)//1024
+    control = f'''Package: little-calendar
+Version: {VERSION}
+Section: utils
+Priority: optional
+Architecture: all
+Maintainer: Little Calendar Project <maintainer@little-calendar.invalid>
+Depends: python3 (>= 3.10), python3-pyqt6 (>= 6.2), fonts-noto-cjk
+Installed-Size: {size}
+Description: Personal calendar with daily tasks and drawing
+ Offline desktop calendar for 2020-2030 with six daily tasks,
+ morning/noon/evening categories, colored pens and local storage.
+'''.encode('utf-8')
+    md5sums = ''.join(hashlib.md5(content).hexdigest() + '  ' + name + '\n' for name, content, _ in files).encode()
+    parts = [('debian-binary', b'2.0\n'),
+             ('control.tar.gz', tar_gz([('control', control, 0o644), ('md5sums', md5sums, 0o644)])),
+             ('data.tar.gz', tar_gz(files))]
+    OUTPUT.parent.mkdir(exist_ok=True)
+    OUTPUT.write_bytes(b'!<arch>\n' + b''.join(ar_member(name, content) for name, content in parts))
+    # Read back the actual artifact; verify the archive, executable mode and payload.
+    blob = OUTPUT.read_bytes()
+    assert blob[:8] == b'!<arch>\n'
+    cursor, recovered = 8, {}
+    while cursor < len(blob):
+        header = blob[cursor:cursor+60]
+        assert header[58:] == b'`\n'
+        length = int(header[48:58])
+        name = header[:16].decode().strip().rstrip('/')
+        recovered[name] = blob[cursor+60:cursor+60+length]
+        cursor += 60 + length + length % 2
+    assert cursor == len(blob) and recovered['debian-binary'] == b'2.0\n'
+    with tarfile.open(fileobj=io.BytesIO(recovered['data.tar.gz']), mode='r:gz') as archive:
+        for name, content, mode in files:
+            assert archive.getmember('./'+name).mode == mode
+            assert archive.extractfile('./'+name).read() == content
+    with tarfile.open(fileobj=io.BytesIO(recovered['control.tar.gz']), mode='r:gz') as archive:
+        assert archive.extractfile('./control').read() == control
+    checksum = hashlib.sha256(blob).hexdigest()
+    OUTPUT.with_suffix('.deb.sha256').write_text(checksum + '  ' + OUTPUT.name + '\n', encoding='ascii')
+    print(f'PASS: Debian archive structure, metadata, payload and launcher permissions\n{OUTPUT}\nSHA256: {checksum}')
+
+
+if __name__ == '__main__':
+    build()

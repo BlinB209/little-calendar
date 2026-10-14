@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Little Calendar
+Name[zh_CN]=小日历
+Comment=Personal calendar with daily tasks and colorful drawing
+Comment[zh_CN]=记录每日事项，使用多色画笔标记日期
+Exec=little-calendar
+Icon=little-calendar
+Terminal=false
+Categories=Office;Calendar;
+StartupNotify=true
+Keywords=calendar;日历;事项;
