@@ -119,7 +119,7 @@ class MonthBoard(QWidget):
     def paintEvent(self, event):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        theme = self.owner.theme_colors
+        theme = getattr(self.owner,'calendar_colors',self.owner.theme_colors)
         mark_style = self.owner.cross_style.currentData()
         prefs = self.owner.custom
         # Show one continuous wallpaper through the desktop and date cells.
@@ -347,7 +347,7 @@ class CalendarApp(QMainWindow):
         self.year, self.month = self.selected.year, self.selected.month
         self.draw_mode, self.color, self.active_board = False, COLORS[0], None
         self.loading = False
-        self.setWindowTitle('小日历 · v0.4.1 自由桌面')
+        self.setWindowTitle('小日历 · v0.5.0 自由桌面' + (' · 安全模式' if '--safe-mode' in sys.argv else ''))
         self.setMinimumSize(760, 600)
         self.resize(1320, 880)
         root = Background(self)
@@ -355,7 +355,9 @@ class CalendarApp(QMainWindow):
         layout = QVBoxLayout(root)
         layout.setContentsMargins(24,18,24,18)
         header = QHBoxLayout()
-        title = QLabel('小日历')
+        title = QLabel('小日历 · 安全模式' if '--safe-mode' in sys.argv else '小日历')
+        if '--safe-mode' in sys.argv:
+            title.setToolTip('第三方 Python 插件未运行，正常启动应用可恢复。')
         title.setObjectName('mainTitle')
         header.addWidget(title)
         self.button('配件商店',lambda: self.body.shop(),header).setToolTip('浏览配件、添加到桌面，管理已添加的配件')
@@ -562,6 +564,8 @@ class CalendarApp(QMainWindow):
 <p><b>移动和缩放</b>：按住配件标题拖动到任意位置；拖右下角斜线调整大小。配件可以重叠，点击标题放到最前。勾选“锁定位置”可防止误动。</p>
 <p><b>找回配件</b>：打开“配件商店 → 我的桌面”，显示或定位已有配件。标题上的 × 只隐藏配件，内容保留。使用“整理布局”可重新平铺。</p>
 <p><b>背景图片</b>：进入“背景与外观”，选择本地图片，查看预览后保存。图片不明显时，降低“日期格底色不透明度”。</p>
+<p><b>模块外观</b>：在配件标题的“设置 → 颜色与透明度”独立选择底色、文字颜色及整体不透明度。100% 为完全不透明，数值越低越透明；取消可恢复原样。</p>
+<p><b>第三方插件</b>：进入“配件商店 → 第三方插件”，导入 ZIP 或 manifest.json，确认信任后启用，再添加到桌面。“保存可编辑示例”提供 Python 模板；打开源码目录修改后可重新加载。插件拥有本机用户权限。</p>
 <p><b>每日事项</b>：在选日期模式点击日期，填写最多六条事项，早/午/晚可自由选择，文字自动保存。左侧勾选表示完成。</p>
 <p><b>绘画与印章</b>：点击“开始标记”，选择画笔、橡皮擦或日期印章。橡皮擦删除经过的整笔笔迹以及日期上的印章。印章形状、文字与粗细在“背景与外观 → 标记与图层”设置。</p>
 <p><b>自动标记</b>：勾选“自动标记”，旁边选择斜线、叉号、横线或淡化。条件可在标记设置里选择已过日期、周末或事项全部完成。</p>
@@ -683,6 +687,7 @@ class CalendarApp(QMainWindow):
 
     def closeEvent(self, event):
         self.body.save_workspace()
+        self.body.shutdown_plugins()
         self.persist('layout:v2', dict(window=[self.width(),self.height()],
             body=self.body.sizes(), sections=self.sections.sizes(),
             orientation=self.orientation.currentIndex(), count=self.count.currentIndex(),
@@ -898,11 +903,35 @@ def main():
         assert not window.background_pixmap.isNull()
         note = window.body.add_module('notes')
         note.text.setPlainText('打包检查')
+        from module_appearance import ModuleAppearanceDialog
+        library = window.body.plugin_library
+        example = library.export_example(Path(temporary.name)/'示例插件.zip')
+        plugin = window.body.import_python_plugin(example)
+        assert not library.is_approved(plugin['id'])
+        if not window.body.safe_mode:
+            window.body.enable_python_plugin(plugin['id'],plugin['digest'])
+            first = window.body.add_module(plugin['id'])
+            second = window.body.add_module(plugin['id'])
+            assert first.instance is not None and second.instance is not None, window.body.plugin_errors
+            editor = first.instance.widget.findChild(QPlainTextEdit)
+            editor.setPlainText('冻结程序动态插件检查')
+            assert first.instance.context.get_value('text') == '冻结程序动态插件检查'
+            assert second.instance.context.get_value('text','') == ''
+            window.body.reload_python_plugin(plugin['id'])
+            assert first.instance.widget.findChild(QPlainTextEdit).toPlainText() == '冻结程序动态插件检查'
+            window.body.disable_plugin(plugin['id'])
+            assert first.instance is None and second.instance is None
+            window.body.enable_python_plugin(plugin['id'],plugin['digest'])
+            assert first.instance is not None
+        assert window.body.set_module_style('main-calendar',dict(background='#172033',foreground='',opacity=80))
+        appearance = ModuleAppearanceDialog(window.body,'main-calendar')
+        appearance.show()
         shop, settings = ModuleShop(window.body), PreferencesDialog(window)
         shop.show()
         settings.show()
         app.processEvents()
-        assert not shop.grab().isNull() and not settings.grab().isNull()
+        assert not shop.grab().isNull() and not settings.grab().isNull() and not appearance.grab().isNull()
+        appearance.reject()
         shop.close()
         settings.close()
         QTimer.singleShot(500, app.quit)

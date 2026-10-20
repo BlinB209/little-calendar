@@ -1,12 +1,14 @@
-# 小日历 · v0.4.1 自由桌面
+# 小日历 · v0.5.0 自由桌面与插件库
 
 本地构建文件位于 `dist` 文件夹；GitHub 发布见 [Releases](https://github.com/BlinB209/little-calendar/releases)。
 
-Windows：双击 `小日历-v0.4.1.exe` 即可运行，不需要安装 Python。本地构建输出为 `dist/小日历-v0.4.1.exe`。
+Windows：双击 `小日历-v0.5.0.exe` 即可运行，不需要安装 Python。本地构建输出为 `dist/小日历-v0.5.0.exe`。
 
 ## 新版操作
 
 - **配件商店**：查看用途和使用方法，点击“添加到桌面”。便签、待办、独立月历、时钟和习惯打卡可重复添加。
+- **第三方插件库**：在商店的“第三方插件”页导入自己或他人的 ZIP 插件包、或源码目录中的 `manifest.json`，确认信任后启用，再添加到桌面。支持停用、打开源码目录、自编辑后重新加载，以及导出可编辑示例。
+- **模块颜色与透明度**：点击模块标题“设置 → 颜色与透明度”，或“我的桌面 → 外观”，独立选择底色、文字色及 15–100% 整体不透明度。100% 为完全不透明，数值越低越透明；支持实时预览、取消还原和恢复主题。
 - **自由摆放**：按住配件标题拖动到任意位置，拖右下角斜线缩放；配件可以重叠，点击标题置于最前。位置和尺寸自动保存。
 - **整理与找回**：顶部“整理布局”可分栏、平铺或层叠。商店的“我的桌面”可以显示、隐藏、重命名和定位配件。× 只隐藏，内容保留。
 - **锁定位置**：禁止拖动和缩放，仍可编辑配件内容。
@@ -15,7 +17,9 @@ Windows：双击 `小日历-v0.4.1.exe` 即可运行，不需要安装 Python。
 - **颜色与自动标记**：支持任意颜色、收藏色和图层显隐；自动标记条件可选已过日期、周末或当日事项全部完成。
 - **操作说明**：顶部按钮提供常用操作指引，当前工具的操作方法显示在窗口下方。
 
-本地商店不依赖服务器，提供五种内置配件；导入 JSON 可创建使用现有配件类型的模板。停用会隐藏该类型的所有实例并保留内容，重新启用后可恢复。此版本不下载在线插件或执行第三方脚本。
+本地商店不依赖服务器，提供五种内置配件；导入 JSON 可创建使用现有配件类型的模板。Python 插件可创建新的界面与逻辑，多个实例分别保存数据。导入只存储文件；首次运行或源码改变后需要确认，停用保留内容。开发接口、存储路径、依赖范围与示例见 [PLUGINS.md](PLUGINS.md)。
+
+Python 插件在日历进程内运行，具有本机用户权限，并非沙箱，请只启用可信源码。若插件导致启动异常，可用 `小日历-v0.5.0.exe --safe-mode` 禁止第三方代码运行，再去插件库停用。源码使用 `python app.py --safe-mode`，Ubuntu 使用 `little-calendar --safe-mode`。
 
 ## 日历功能
 
@@ -35,7 +39,7 @@ Windows：双击 `小日历-v0.4.1.exe` 即可运行，不需要安装 Python。
 
 尚未提供整套配置、事项与笔迹的导入导出。
 
-Ubuntu：运行 `sudo apt install ./little-calendar_0.4.1_all.deb`，详细安装与验证状态见 [UBUNTU.md](UBUNTU.md)。
+Ubuntu：运行 `sudo apt install ./little-calendar_0.5.0_all.deb`，详细安装与验证状态见 [UBUNTU.md](UBUNTU.md)。
 
 ![夜间主题和叉号划去样式](preview-night.png)
 
@@ -49,4 +53,4 @@ Windows 打包：安装依赖到 `.venv` 后执行 `powershell -ExecutionPolicy 
 
 Ubuntu 打包：`python build_ubuntu.py`。此包不含本机二进制，依赖由 apt 安装；实际 Ubuntu 桌面运行尚待验证。
 
-Windows 功能检查：`verify.py`、`verify_preview.py`、`verify_layout.py`、`verify_background.py`、`verify_shop.py` 使用临时数据库及 PySide6。打包后的 `--smoke-test` 还检查本地图片解码、配件商店和外观设置页面，不改动个人数据。
+Windows 功能检查：`verify.py`、`verify_preview.py`、`verify_layout.py`、`verify_background.py`、`verify_shop.py` 使用临时数据库及 PySide6。插件检查见 `verify_python_plugins.py`、`verify_plugin_library_ui.py`；外观检查见 `verify_module_appearance.py`、`verify_appearance_integration.py`。打包后的 `--smoke-test` 还检查图片解码、商店、外观设置，以及示例插件的导出、导入、动态加载、数据隔离和停用恢复，不改动个人数据。

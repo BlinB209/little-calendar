@@ -1,9 +1,12 @@
-"""Dockable modules and a local, declarative plugin catalog (no code execution)."""
+"""Free desktop, built-in accessories and explicitly enabled Python plugins."""
 import json
 import re
 import uuid
+import sys
 from datetime import datetime, date
 from qt_compat import *
+from plugin_runtime import PluginLibrary, PluginError, PluginApprovalRequired
+from module_appearance import normalize_style, resolved_colors, apply_panel_style, ModuleAppearanceDialog
 
 CATALOG = [
     dict(id='notes', title='便签', kind='note', description='独立保存的自由文字便签，可重复添加。'),
@@ -166,12 +169,75 @@ class ModuleWidget(QWidget):
         super().hideEvent(event)
 
 
+class PythonModuleWidget(QWidget):
+    """Keep a plugin's content and lifecycle separate from the desktop panel."""
+    def __init__(self,workspace,record):
+        super().__init__()
+        self.workspace, self.record = workspace, record
+        self.instance = None
+        self.box = QVBoxLayout(self)
+        self.box.setContentsMargins(0,0,0,0)
+        self.setMinimumSize(180,140)
+        if workspace.safe_mode:
+            self.show_message('安全模式：未运行第三方插件。正常启动应用后可在插件库启用。')
+        elif record['plugin'] in workspace.installed:
+            self.start()
+        else:
+            self.show_message('此插件已停用。内容保留，可在第三方插件库恢复。')
+
+    def clear_content(self):
+        if self.instance is not None:
+            instance, self.instance = self.instance, None
+            try:
+                instance.cleanup()
+            except Exception as exc:
+                self.workspace.plugin_errors[self.record['plugin']] = str(exc)
+        while self.box.count():
+            item = self.box.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                for timer in widget.findChildren(QTimer):
+                    timer.stop()
+                widget.hide()
+                widget.deleteLater()
+
+    def show_message(self,message):
+        label = QLabel(message)
+        label.setWordWrap(True)
+        label.setTextFormat(Qt.TextFormat.PlainText)
+        self.box.addWidget(label)
+
+    def stop(self):
+        self.clear_content()
+        self.show_message('此插件已停用。内容保留，可在第三方插件库恢复。')
+
+    def start(self):
+        self.clear_content()
+        key = self.record['plugin']
+        if self.workspace.safe_mode:
+            self.show_message('安全模式下不运行第三方插件。')
+            return
+        try:
+            self.instance = self.workspace.plugin_library.create_widget(key,self.record['id'],self.workspace.owner)
+            self.box.addWidget(self.instance.widget)
+            self.workspace.plugin_errors.pop(key,None)
+        except PluginApprovalRequired:
+            self.show_message('插件尚未授权，或代码已经改变。请在“第三方插件”中确认后启用。')
+        except Exception as exc:
+            self.workspace.plugin_errors[key] = str(exc)
+            self.show_message('插件启动失败：'+str(exc)+'\n可在插件库停用，或修改代码后重新加载。')
+
+
 class Workspace(QMainWindow):
     """Free placement workspace; old module content keys remain unchanged."""
     def __init__(self,owner):
         super().__init__()
         from free_canvas import FreeCanvas
         self.owner = owner
+        self.safe_mode = '--safe-mode' in sys.argv
+        self.plugin_library = PluginLibrary(owner.store)
+        self.plugin_errors = {}
+        self.style_cache = {}
         self.docks, self.core = {}, []
         self.restoring = True
         self.arranging = False
@@ -185,8 +251,10 @@ class Workspace(QMainWindow):
                 continue
             if not any(p['id'] == plugin['id'] for p in self.catalog):
                 self.catalog.append(plugin)
+        default_installed = [p['id'] for p in self.catalog]
+        self.refresh_python_catalog()
         known = {p['id']:p for p in self.catalog}
-        self.installed = list(dict.fromkeys(key for key in owner.store.get('plugins:installed',list(known)) if key in known))
+        self.installed = list(dict.fromkeys(key for key in owner.store.get('plugins:installed',default_installed) if key in known))
         self.records = []
         seen = {'main-calendar','daily-editor'}
         for record in owner.store.get('workspace:modules',[]):
@@ -316,9 +384,12 @@ class Workspace(QMainWindow):
         self.owner.persist('workspace:locked',locked)
 
     def add_module(self,plugin_id,record=None):
+        self.refresh_python_catalog()
         plugin = next((p for p in self.catalog if p['id'] == plugin_id),None)
         if plugin is None or plugin_id not in self.installed:
             raise ValueError('请先启用该配件')
+        if plugin['kind'] == 'python' and (self.safe_mode or not self.plugin_library.is_approved(plugin_id)):
+            raise ValueError('请在普通启动模式下，从第三方插件库确认并启用当前插件代码。')
         if record is None:
             record = dict(id=uuid.uuid4().hex,plugin=plugin_id,kind=plugin['kind'],title=plugin['title'],visible=True)
             self.records.append(record)
@@ -334,7 +405,7 @@ class Workspace(QMainWindow):
         return widget
 
     def create_module(self,record):
-        widget = ModuleWidget(self.owner,record)
+        widget = PythonModuleWidget(self,record) if record['kind'] == 'python' else ModuleWidget(self.owner,record)
         dock = self.create_dock(record['id'],record['title'],widget)
         dock.setVisible(record.get('visible',True) and record['plugin'] in self.installed)
         return widget
@@ -401,9 +472,16 @@ class Workspace(QMainWindow):
             raise ValueError('找不到该配件')
         if key in self.installed:
             return
+        plugin = next(p for p in self.catalog if p['id'] == key)
+        if plugin['kind'] == 'python':
+            if self.safe_mode or not self.plugin_library.is_approved(key):
+                raise ValueError('请先在第三方插件库确认并启用当前代码。')
         self.installed.append(key)
         for record in self.records:
             if record['plugin'] == key:
+                widget = self.docks[record['id']].widget()
+                if isinstance(widget,PythonModuleWidget):
+                    widget.start()
                 self.docks[record['id']].setVisible(record.get('visible',True))
         self.owner.persist('plugins:installed',self.installed)
         self.save_workspace()
@@ -414,7 +492,10 @@ class Workspace(QMainWindow):
         self.installed.remove(key)
         for record in self.records:
             if record['plugin'] == key:
-                self.docks[record['id']].hide()
+                panel = self.docks[record['id']]
+                panel.hide()
+                if isinstance(panel.widget(),PythonModuleWidget):
+                    panel.widget().stop()
         self.owner.persist('plugins:installed',self.installed)
         self.resize_canvas()
         self.save_workspace()
@@ -427,9 +508,67 @@ class Workspace(QMainWindow):
         if any(p['id'] == plugin['id'] for p in self.catalog):
             raise ValueError('这个配件已经存在')
         self.catalog.append(plugin)
-        self.owner.persist('plugins:custom',[p for p in self.catalog if p['id'] not in {v['id'] for v in CATALOG}])
+        self.owner.persist('plugins:custom',[p for p in self.catalog if p['kind'] != 'python' and p['id'] not in {v['id'] for v in CATALOG}])
         self.install_plugin(plugin['id'])
         return plugin
+
+    def refresh_python_catalog(self):
+        base = [p for p in self.catalog if p.get('kind') != 'python']
+        reserved = {p['id'] for p in base}
+        self.catalog = base+[p for p in self.plugin_library.catalog() if p['id'] not in reserved]
+        # Keep the original instance ids and layout when source files have been
+        # moved or temporarily removed. Reimporting can then recover their data.
+        known = {p['id'] for p in self.catalog}
+        records = self.records if hasattr(self,'records') else self.owner.store.get('workspace:modules',[])
+        for record in records:
+            if not isinstance(record,dict) or record.get('kind') != 'python':
+                continue
+            key = record.get('plugin')
+            if not isinstance(key,str) or not re.fullmatch(r'[a-z][a-z0-9_-]{1,63}',key) or key in known:
+                continue
+            self.catalog.append(dict(id=key,title=key,kind='python',description='原有插件的源码暂时缺失，桌面实例及数据已保留。',
+                version='',approved=False,digest='',error='找不到插件源码，请重新导入同 ID 的插件以恢复。'))
+            known.add(key)
+
+    def import_python_plugin(self,path):
+        reserved = {p['id'] for p in self.catalog if p['kind'] != 'python'}
+        plugin = self.plugin_library.import_package(path,reserved_ids=reserved)
+        self.refresh_python_catalog()
+        # Import only copies files. Enable is a separate explicit operation.
+        self.owner.persist('plugins:installed',self.installed)
+        return plugin
+
+    def enable_python_plugin(self,key,digest=None):
+        if self.safe_mode:
+            raise ValueError('安全模式下不运行第三方插件；请正常启动应用后再启用。')
+        self.plugin_library.approve(key,digest=digest)
+        self.refresh_python_catalog()
+        if key in self.installed:
+            self.reload_python_plugin(key,digest)
+        else:
+            self.install_plugin(key)
+
+    def reload_python_plugin(self,key,digest=None):
+        if self.safe_mode:
+            raise ValueError('安全模式下不运行第三方插件。')
+        if digest is not None:
+            self.plugin_library.approve(key,digest=digest)
+        if not self.plugin_library.is_approved(key):
+            raise ValueError('源码已改变，请在插件库确认新代码后再加载。')
+        self.refresh_python_catalog()
+        if key not in self.installed:
+            self.install_plugin(key)
+            return
+        for record in self.records:
+            if record['plugin'] == key:
+                self.docks[record['id']].widget().start()
+        self.apply_colors()
+        self.save_workspace()
+
+    def shutdown_plugins(self):
+        for panel in self.docks.values():
+            if isinstance(panel.widget(),PythonModuleWidget):
+                panel.widget().clear_content()
 
     def restore_workspace(self):
         self.restoring = True
@@ -477,28 +616,57 @@ class Workspace(QMainWindow):
         self.arrange_default()
 
     def set_module_color(self,dock,reset=False):
-        key = 'module-color:'+dock.objectName()
+        key = dock.objectName()
+        style = self.get_module_style(key)
         if reset:
-            self.owner.persist(key,'')
+            style.update(background='',foreground='')
         else:
-            color = QColorDialog.getColor(QColor(self.owner.theme_colors['surface']),self,'配件底色')
+            color = QColorDialog.getColor(QColor(style['background'] or self.owner.theme_colors['surface']),self,'配件底色')
             if not color.isValid():
                 return
-            self.owner.persist(key,color.name())
+            style['background'] = color.name()
+        self.set_module_style(key,style)
+
+    def get_module_style(self,key):
+        if key not in self.style_cache:
+            self.style_cache[key] = normalize_style(self.owner.store.get('module-style:'+key,{}),self.owner.store.get('module-color:'+key,''))
+        return dict(self.style_cache[key])
+
+    def preview_module_style(self,key,style):
+        self.style_cache[key] = normalize_style(style)
         self.apply_colors()
 
+    def set_module_style(self,key,style):
+        style = normalize_style(style)
+        if self.owner.persist('module-style:'+key,style):
+            self.style_cache[key] = style
+            self.apply_colors()
+            return True
+        return False
+
+    def open_module_appearance(self,key):
+        if key in self.docks:
+            ModuleAppearanceDialog(self,key).exec()
+
     def apply_colors(self):
-        self.owner.calendar_surface = self.owner.store.get('module-color:main-calendar','')
+        calendar_style = self.get_module_style('main-calendar')
+        self.owner.calendar_surface = calendar_style['background']
+        self.owner.calendar_foreground = calendar_style['foreground']
         theme = self.owner.theme_colors
+        calendar_colors = dict(theme)
+        if calendar_style['background'] or calendar_style['foreground']:
+            background, foreground = resolved_colors(calendar_style,theme)
+            def blend(first,second,amount):
+                a,b = QColor(first),QColor(second)
+                return QColor(*(round(x*(1-amount)+y*amount) for x,y in zip(a.getRgb()[:3],b.getRgb()[:3]))).name()
+            calendar_colors.update(surface=background,text=foreground,
+                alternate=blend(background,foreground,.04),faded=blend(background,foreground,.07),
+                selected=blend(background,theme['accent'],.20),grid=blend(background,foreground,.20),
+                muted=foreground,dim=blend(background,foreground,.70),
+                morning=foreground,noon=foreground,evening=foreground)
+        self.owner.calendar_colors = calendar_colors
         for key,panel in self.docks.items():
-            color = self.owner.store.get('module-color:'+key,'')
-            if color and QColor(color).isValid():
-                foreground = '#162033' if QColor(color).lightnessF() > .55 else '#edf2fc'
-                panel.widget().setStyleSheet(f'background:{color};color:{foreground};')
-            else:
-                color = theme['surface']
-                panel.widget().setStyleSheet('')
-            panel.setStyleSheet(f'QFrame[freePanel="true"] {{background:{color};border:1px solid {theme["border"]};border-radius:9px;}}')
+            apply_panel_style(panel,self.get_module_style(key),theme)
         self.canvas.update()
         for board in getattr(self.owner,'boards',[]):
             board.update()

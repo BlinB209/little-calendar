@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "api_version": 1,
+  "id": "python-note",
+  "title": "Python 便签示例",
+  "version": "1.0.0",
+  "kind": "python",
+  "entry": "main.py",
+  "description": "带独立存储、当前日期和日期插入按钮的可编辑 Python 插件示例",
+  "author": "Little Calendar"
+}

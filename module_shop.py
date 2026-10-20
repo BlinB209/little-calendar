@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 
 from qt_compat import *
+from plugin_library_ui import PythonPluginLibraryPage
 if sys.platform == 'linux':
     from PyQt6.QtWidgets import QGridLayout, QSizePolicy
 else:
@@ -21,6 +22,7 @@ KINDS = {
 
 def label(text, *, muted=False, size=None):
     result = QLabel(text)
+    result.setTextFormat(Qt.TextFormat.PlainText)
     result.setWordWrap(True)
     result.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
     if muted:
@@ -122,6 +124,8 @@ class ModuleShop(QDialog):
         box.addWidget(self.tabs, 1)
         self._build_catalog()
         self._build_desktop()
+        self.python_page = PythonPluginLibraryPage(self)
+        self.tabs.addTab(self.python_page, '第三方插件')
         self._build_help()
         self.tabs.currentChanged.connect(self._tab_changed)
         self.status = label('选一个配件，点击“添加到桌面”即可开始。')
@@ -129,10 +133,10 @@ class ModuleShop(QDialog):
         self.status.setAccessibleName('操作反馈')
         box.addWidget(self.status)
         footer = QHBoxLayout()
-        self.import_button = self._button('导入配件文件…', self.choose_import)
+        self.import_button = self._button('导入 JSON 模板…', self.choose_import)
         self.import_button.setToolTip('读取本地 JSON 配件模板；导入成功后可添加到桌面。')
         footer.addWidget(self.import_button)
-        self.example_button = self._button('保存示例文件…', self.choose_export)
+        self.example_button = self._button('保存 JSON 示例…', self.choose_export)
         self.example_button.setToolTip('保存一个可以修改名称后导入的便签示例。')
         footer.addWidget(self.example_button)
         footer.addStretch()
@@ -219,8 +223,10 @@ class ModuleShop(QDialog):
             ('01  添加与摆放', '在“发现配件”点击“添加到桌面”。返回桌面后，拖动配件顶部标题移动；拖右下角缩放。配件可以自由重叠，点击会置前。若不能移动，请取消顶部“锁定位置”。'),
             ('02  主日历与配件有什么区别？', '主日历用于在日期格子里手写、盖章和查看每日事项；配件是额外的便签、清单、时钟等。独立月历用于翻月选日，不提供手写。便签接受键盘文字输入。'),
             ('03  隐藏、停用与恢复', '隐藏：只收起某一份配件，在“我的桌面”中重新显示即可。停用：隐藏此种配件的全部实例，保留内容。点击“恢复使用”恢复原有状态；点击“添加到桌面”则会同时再创建一份。'),
-            ('04  自定义配件文件', '点击“保存示例文件”得到一个便签模板。用文本编辑器修改 title（显示名称）和 description（用途说明），保存为 JSON 后导入。id 必须唯一，使用小写字母、数字、横线或下划线。'),
-            ('05  目前支持的本地类型', 'note：便签；checklist：待办清单；calendar：独立月历；clock：数字时钟；habit：习惯打卡。配件文件只描述这些已有功能，不包含新程序，也不执行脚本。当前商店不连接在线插件源。'),
+            ('04  颜色与透明度', '进入“我的桌面”，点击配件的“外观”修改颜色与背景不透明度。每份配件独立设置，不会改变其他配件。'),
+            ('05  JSON 配件模板', '点击“保存 JSON 示例”得到便签模板。修改 title（名称）和 description（说明）后保存并导入。模板支持 note、checklist、calendar、clock、habit 五种已有功能，不执行程序。id 必须唯一，使用小写字母、数字、横线或下划线。'),
+            ('06  自编辑与第三方 Python 插件', '在“第三方插件”导入 ZIP 插件包，或选择源码目录中的清单文件。导入仅将文件存入本机模组库；确认信任并启用后，点击“添加到桌面”调用。Python 插件可编写新逻辑和界面，在主进程运行并可访问本机文件和网络。'),
+            ('07  修改插件后如何生效？', '在“第三方插件”选择插件 → 打开源码目录 → 用编辑器修改并保存 → 重新加载修改。源码改变后需重新确认信任。停用会关闭相关配件，已保存数据保留。使用“保存可编辑示例”获取开发模板；当前商店不连接在线插件源。'),
         ]
         for title, text in sections:
             box.addWidget(label(title, size=18))
@@ -233,6 +239,11 @@ class ModuleShop(QDialog):
     def _tab_changed(self, index):
         if index == 1:
             self.refresh_modules()
+        elif self.tabs.widget(index) is self.python_page:
+            self.python_page.refresh()
+        python_tab = self.tabs.widget(index) is self.python_page
+        self.import_button.setVisible(not python_tab)
+        self.example_button.setVisible(not python_tab)
 
     def _clear(self, layout):
         while layout.count():
@@ -250,6 +261,8 @@ class ModuleShop(QDialog):
         state = self.filter.currentIndex()
         matches = []
         for plugin in self.workspace.catalog:
+            if plugin['kind'] == 'python':
+                continue
             available = plugin['id'] in self.workspace.installed
             kind_category = KINDS.get(plugin['kind'], ('其他', '', ''))[0]
             searchable = ' '.join([plugin['title'], plugin.get('description', ''), kind_category]).casefold()
@@ -344,7 +357,7 @@ class ModuleShop(QDialog):
             elif key == 'daily-editor':
                 detail = '每日事项 · 编辑选中日期的早、午、晚六项安排'
             else:
-                detail = f"{KINDS[record['kind']][1]} · 内容独立保存"
+                detail = f"{KINDS.get(record['kind'], ('其他', 'Python 插件', ''))[1]} · 内容独立保存"
             box.addWidget(label(detail + (' · 显示中' if visible else ' · 已隐藏') if available else detail + ' · 已停用，内容保留', muted=True))
             actions = QHBoxLayout()
             toggle = QCheckBox('在桌面显示')
@@ -359,6 +372,9 @@ class ModuleShop(QDialog):
             else:
                 actions.addWidget(self._button('恢复并显示', lambda _checked=False, k=key: self.restore_module(k)))
             actions.addWidget(self._button('重命名…', lambda _checked=False, k=key: self.prompt_rename(k)))
+            appearance = self._button('外观…', lambda _checked=False, k=key: self.workspace.open_module_appearance(k))
+            appearance.setObjectName('appearance:'+key)
+            actions.addWidget(appearance)
             box.addLayout(actions)
             self.module_list.addWidget(card)
         if not self.workspace.docks:
@@ -397,7 +413,15 @@ class ModuleShop(QDialog):
 
     def restore_module(self, key):
         record = next(r for r in self.workspace.records if r['id'] == key)
-        self.workspace.install_plugin(record['plugin'])
+        if record['kind'] == 'python':
+            try:
+                if not self.python_page.enable_plugin(record['plugin']):
+                    return
+            except Exception as error:
+                QMessageBox.warning(self, '未能恢复插件', str(error))
+                return
+        else:
+            self.workspace.install_plugin(record['plugin'])
         self.workspace.set_module_visible(key, True)
         self._refresh('已恢复并显示配件，原有内容保留。')
 
@@ -453,7 +477,7 @@ class ModuleShop(QDialog):
         try:
             self.import_path(path)
         except (ValueError, OSError, UnicodeError) as error:
-            QMessageBox.warning(self, '未能导入配件', f'{error}\n\n可以先点击“保存示例文件”，参考示例的填写方式。')
+            QMessageBox.warning(self, '未能导入配件', f'{error}\n\n可以先点击“保存 JSON 示例”，参考示例的填写方式。')
 
     def export_example(self, path):
         example = dict(schema=1, id='my-reading-note', title='阅读便签', kind='note', description='记下读到的好句子，以及下次想读的书。')
