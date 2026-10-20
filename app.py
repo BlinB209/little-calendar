@@ -2,25 +2,32 @@ import sys
 import os
 import json
 import sqlite3
+import copy
+import math
 from datetime import date, timedelta
 from pathlib import Path
+from theme import colors, stylesheet
+from workspace import Workspace
+from preferences import preferences, Background, PreferencesDialog, load_background, paint_background
+from markings import stroke_hit
+from qt_compat import QColorDialog, QSpinBox, QPlainTextEdit, QTextEdit, QDialog, QMenu
 
 if sys.platform == 'linux':
     # Ubuntu supplies Qt through apt, so installation needs no pip or venv.
-    from PyQt6.QtCore import Qt, QTimer, QRectF, QPointF
-    from PyQt6.QtGui import QColor, QPainter, QPen, QFont, QFontDatabase, QPalette
+    from PyQt6.QtCore import Qt, QTimer, QRectF, QPointF, QPoint
+    from PyQt6.QtGui import QColor, QPainter, QPen, QFont, QFontDatabase, QPalette, QShortcut, QKeySequence
     from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
         QHBoxLayout, QLabel, QPushButton, QComboBox, QScrollArea, QFrame,
-        QLineEdit, QCheckBox, QMessageBox)
+        QLineEdit, QCheckBox, QMessageBox, QSplitter, QSizePolicy)
 else:
-    from PySide6.QtCore import Qt, QTimer, QRectF, QPointF
-    from PySide6.QtGui import QColor, QPainter, QPen, QFont, QFontDatabase, QPalette
+    from PySide6.QtCore import Qt, QTimer, QRectF, QPointF, QPoint
+    from PySide6.QtGui import QColor, QPainter, QPen, QFont, QFontDatabase, QPalette, QShortcut, QKeySequence
     from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
         QHBoxLayout, QLabel, QPushButton, QComboBox, QScrollArea, QFrame,
-        QLineEdit, QCheckBox, QMessageBox)
+        QLineEdit, QCheckBox, QMessageBox, QSplitter, QSizePolicy)
 
-MIN_YEAR, MAX_YEAR = 2020, 2030
-COLORS = ['#5369dc', '#df6583', '#e7ac38', '#39a78d', '#8b65c1']
+MIN_YEAR, MAX_YEAR = date.today().year - 10, date.today().year + 10
+COLORS = ['#000000', '#5369dc', '#df6583', '#e7ac38', '#39a78d', '#8b65c1']
 FONT_FAMILY = 'Noto Sans CJK SC' if sys.platform == 'linux' else 'Microsoft YaHei'
 
 
@@ -41,6 +48,38 @@ class Store:
         with self.db:
             self.db.execute('INSERT OR REPLACE INTO entries VALUES (?, ?)', (key, json.dumps(value, ensure_ascii=False)))
 
+    def load_days(self):
+        return {key[4:]: json.loads(value) for key, value in
+                self.db.execute("SELECT key,value FROM entries WHERE key LIKE 'day:%'")}
+
+
+class AdaptivePanel(QFrame):
+    """Scale text with the panel, within usable bounds on small screens."""
+    def __init__(self, base_width, base_height):
+        super().__init__()
+        self.base_width, self.base_height = base_width, base_height
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.refresh_font()
+
+    def refresh_font(self):
+        prefs = QApplication.instance().property('calendarCustom') or {}
+        scale = max(.75, min(1.8, self.width()/self.base_width, self.height()/self.base_height))
+        if not prefs.get('font_auto',True):
+            scale = 1
+        font = QFont(prefs.get('font_family') or FONT_FAMILY)
+        font.setPixelSize(round(prefs.get('font_size',14)*scale))
+        self.setFont(font)
+        # Style sheets can stop font propagation to descendants, so apply it
+        # explicitly to controls as well as to the panel itself.
+        for child in self.findChildren(QWidget):
+            child.setFont(font)
+            if child.property('largeText'):
+                large = QFont(font)
+                large.setPixelSize(round(prefs.get('font_size',14)*1.57*scale))
+                child.setFont(large)
+
 
 class MonthBoard(QWidget):
     def __init__(self, owner, year, month):
@@ -48,86 +87,240 @@ class MonthBoard(QWidget):
         self.owner, self.year, self.month = owner, year, month
         self.key = 'ink:%04d-%02d' % (year, month)
         self.strokes = owner.store.get(self.key, [])
+        self.stamp_key = self.key.replace('ink:', 'stamps:')
+        self.stamps = owner.store.get(self.stamp_key, [])
+        self.history = []
         self.redo_stack = []
         self.current = None
+        self.erasing = False
+        self.erase_previous = None
         first = date(year, month, 1)
         start = first - timedelta(days=first.weekday())
         self.days = [start + timedelta(days=i) for i in range(42)]
-        self.setMinimumSize(630, 650)
+        self.setMinimumSize(420, 460)
         self.setMouseTracking(True)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+
+    def scale_factor(self):
+        return max(.6, min(2.5, self.width()/700, self.height()/650))
+
+    def header_height(self):
+        return 85*self.scale_factor()
+
+    def draw_font(self, size, bold=False):
+        font = QFont(self.owner.custom.get('font_family') or FONT_FAMILY)
+        factor = self.owner.custom['font_size']/14
+        if not self.owner.custom.get('font_auto',True):
+            factor /= self.scale_factor()
+        font.setPixelSize(max(1, round(size*4/3*factor)))
+        font.setBold(bold)
+        return font
 
     def paintEvent(self, event):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.fillRect(self.rect(), QColor('#ffffff'))
-        p.setFont(QFont(FONT_FAMILY, 15, QFont.Weight.Bold))
-        p.setPen(QColor('#25334b'))
-        p.drawText(QRectF(20, 8, self.width()-40, 40), Qt.AlignmentFlag.AlignVCenter, f'{self.year} 年  {self.month:02d} 月')
-        w, h = self.width()/7, (self.height()-85)/6
-        p.setFont(QFont(FONT_FAMILY, 9))
+        theme = self.owner.theme_colors
+        mark_style = self.owner.cross_style.currentData()
+        prefs = self.owner.custom
+        # Show one continuous wallpaper through the desktop and date cells.
+        root = self.owner.centralWidget()
+        origin = self.mapTo(root,QPoint(0,0))
+        p.save()
+        p.translate(-origin.x(),-origin.y())
+        paint_background(p,QRectF(root.rect()),prefs,theme,self.owner.background_pixmap)
+        p.restore()
+        scale = self.scale_factor()
+        p.scale(scale, scale)
+        width, height = self.width()/scale, self.height()/scale
+        header_color = QColor(theme['surface'])
+        header_color.setAlpha(240)
+        p.fillRect(QRectF(0,0,width,85),header_color)
+        p.setFont(self.draw_font(15,True))
+        p.setPen(QColor(theme['text']))
+        p.drawText(QRectF(20, 8, width-40, 40), Qt.AlignmentFlag.AlignVCenter, f'{self.year} 年  {self.month:02d} 月')
+        w, h = width/7, (height-85)/6
+        today = date.today()
+        p.setFont(self.draw_font(9))
         for col, name in enumerate(['一', '二', '三', '四', '五', '六', '日']):
-            p.setPen(QColor('#8992a6'))
+            p.setPen(QColor(theme['muted']))
             p.drawText(QRectF(col*w, 50, w, 30), Qt.AlignmentFlag.AlignCenter, '周'+name)
         for i, day in enumerate(self.days):
             x, y = (i % 7)*w, 85+(i//7)*h
             rect = QRectF(x+2, y+2, w-4, h-4)
             active = day.month == self.month
-            p.fillRect(rect, QColor('#ffffff' if active else '#f7f8fb'))
+            crossed = self.owner.is_past_day(day, today)
+            faded = crossed and mark_style == 'fade'
+            cell_color = QColor(theme['faded'] if faded else (self.owner.calendar_surface or theme['surface']) if active else theme['alternate'])
+            cell_color.setAlpha(round(255*prefs.get('cell_opacity',92)/100))
+            p.fillRect(rect,cell_color)
             if day == self.owner.selected:
-                p.fillRect(rect, QColor('#eef1ff'))
-            p.setPen(QPen(QColor('#e9edf3'), 1))
+                p.fillRect(rect, QColor(theme['selected']))
+            p.setPen(QPen(QColor(theme['grid']), 1))
             p.drawRoundedRect(rect, 6, 6)
-            if day == date.today():
-                p.setBrush(QColor('#5369dc'))
+            if crossed:
+                mark_color = QColor(prefs.get('mark_color') or theme['mark'])
+                mark_color.setAlpha(round(255*prefs['mark_opacity']/100))
+                p.setPen(QPen(mark_color, prefs['mark_width']))
+                if mark_style in ('diagonal', 'cross'):
+                    p.drawLine(QPointF(x+8, y+h-10), QPointF(x+w-8, y+10))
+                if mark_style == 'cross':
+                    p.drawLine(QPointF(x+8, y+10), QPointF(x+w-8, y+h-10))
+                if mark_style == 'horizontal':
+                    p.drawLine(QPointF(x+8, y+h/2), QPointF(x+w-8, y+h/2))
+            p.setOpacity(.48 if faded else 1.0)
+            if day == today:
+                p.setBrush(QColor(theme['accent']))
                 p.setPen(Qt.PenStyle.NoPen)
                 p.drawEllipse(QRectF(x+9, y+7, 26, 26))
                 p.setBrush(Qt.BrushStyle.NoBrush)
-            p.setFont(QFont(FONT_FAMILY, 10, QFont.Weight.Bold))
-            p.setPen(QColor('#ffffff' if day == date.today() else '#35435c' if active else '#aab1be'))
+            date_font = self.draw_font(10,True)
+            date_font.setStrikeOut(crossed and not faded)
+            p.setFont(date_font)
+            p.setPen(QColor('#ffffff' if day == today else theme['text'] if active else theme['dim']))
             p.drawText(QRectF(x+9, y+7, 26, 26), Qt.AlignmentFlag.AlignCenter, str(day.day))
-            rows = self.owner.store.get('day:'+day.isoformat(), [])
+            rows = self.owner.day_entries.get(day.isoformat(), [])
             line_height = min(18, max(10, (h-37)/6))
-            p.setFont(QFont(FONT_FAMILY, 8))
+            p.setFont(self.draw_font(8))
             for j, row in enumerate(rows):
-                p.setPen(QColor('#a5acb9' if row['done'] else {'早':'#ba8a2e','午':'#3b9c8b','晚':'#8270bf'}[row['period']]))
+                p.setPen(QColor(theme['dim'] if row['done'] else theme[{'早':'morning','午':'noon','晚':'evening'}[row['period']]]))
                 text = ('✓ ' if row['done'] else '') + row['period']+' · '+row['text']
                 text = p.fontMetrics().elidedText(text, Qt.TextElideMode.ElideRight, int(w-16))
                 p.drawText(QRectF(x+8, y+36+j*line_height, w-16, line_height), Qt.AlignmentFlag.AlignVCenter, text)
-        p.setClipRect(QRectF(0, 85, self.width(), self.height()-85))
-        for stroke in self.strokes + ([self.current] if self.current else []):
+            p.setOpacity(1.0)
+        p.setClipRect(QRectF(0, 85, width, height-85))
+        if prefs['show_stamps']:
+            for stamp in self.stamps:
+                day = date.fromisoformat(stamp['day'])
+                if day not in self.days:
+                    continue
+                index = self.days.index(day)
+                x,y = index%7*w,85+(index//7)*h
+                target = QRectF(x+8,y+8,w-16,h-16)
+                color = QColor(stamp['color'])
+                color.setAlpha(round(255*stamp.get('opacity',80)/100))
+                p.setPen(QPen(color,stamp.get('width',3)))
+                kind = stamp['kind']
+                if kind == 'circle':
+                    p.drawEllipse(target)
+                elif kind == 'box':
+                    p.drawRoundedRect(target,8,8)
+                elif kind == 'cross':
+                    p.drawLine(target.topLeft(),target.bottomRight())
+                    p.drawLine(target.bottomLeft(),target.topRight())
+                elif kind == 'underline':
+                    p.drawLine(target.bottomLeft(),target.bottomRight())
+                elif kind == 'fill':
+                    color.setAlpha(min(100,color.alpha()))
+                    p.fillRect(target,color)
+                elif kind == 'text':
+                    p.setFont(self.draw_font(12,True))
+                    text = p.fontMetrics().elidedText(stamp.get('text',''),Qt.TextElideMode.ElideRight,int(target.width()))
+                    p.drawText(target,Qt.AlignmentFlag.AlignCenter,text)
+        for stroke in (self.strokes + ([self.current] if self.current else [])) if prefs['show_ink'] else []:
             color = QColor(stroke['color'])
-            color.setAlpha(110 if stroke.get('highlight') else 230)
-            pen = QPen(color, stroke['width'] * self.width()/700, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
-            p.setPen(pen)
-            points = [QPointF(a*self.width(), 85+b*(self.height()-85)) for a,b in stroke['points']]
-            if len(points) == 1:
-                p.drawPoint(points[0])
-            for a,b in zip(points, points[1:]):
-                p.drawLine(a,b)
+            color.setAlpha(round(255*stroke['opacity']/100) if 'opacity' in stroke else (110 if stroke.get('highlight') else 230))
+            pen = QPen(color, stroke['width'] * width/700, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
+            points = [QPointF(a*width, 85+b*(height-85)) for a,b in stroke['points']]
+            # Preserve actual black ink, adding only a light outline at night.
+            pens = [pen]
+            if self.owner.night_mode.isChecked() and stroke['color'] == '#000000':
+                halo = QPen(pen)
+                halo.setColor(QColor('#a6b4ca'))
+                halo.setWidthF(pen.widthF()+2)
+                pens.insert(0, halo)
+            for active_pen in pens:
+                p.setPen(active_pen)
+                if len(points) == 1:
+                    p.drawPoint(points[0])
+                for a,b in zip(points, points[1:]):
+                    p.drawLine(a,b)
 
     def norm(self, pos):
-        return [max(0, min(1, pos.x()/self.width())), max(0,min(1,(pos.y()-85)/(self.height()-85)))]
+        header = self.header_height()
+        return [max(0, min(1, pos.x()/self.width())), max(0,min(1,(pos.y()-header)/(self.height()-header)))]
+
+    def day_at(self,pos):
+        header = self.header_height()
+        if pos.y() < header or not self.rect().contains(pos.toPoint()):
+            return None
+        index = min(41,int((pos.y()-header)/((self.height()-header)/6))*7+int(pos.x()/(self.width()/7)))
+        return self.days[index]
+
+    def snapshot(self):
+        return copy.deepcopy(dict(strokes=self.strokes,stamps=self.stamps))
+
+    def begin_edit(self):
+        self.history.append(self.snapshot())
+        self.history = self.history[-100:]
+        self.redo_stack.clear()
+
+    def restore_snapshot(self, value):
+        self.strokes, self.stamps = copy.deepcopy(value['strokes']), copy.deepcopy(value['stamps'])
+        self.save()
+
+    def erase_at(self,pos):
+        header = self.header_height()
+        point = (pos.x(),pos.y()-header)
+        if self.owner.custom['show_ink']:
+            self.strokes = [stroke for stroke in self.strokes if not stroke_hit(stroke,point,self.width(),self.height()-header,self.owner.custom['eraser_size'],previous=self.erase_previous)]
+        if self.owner.custom['show_stamps']:
+            start = self.erase_previous or point
+            steps = max(1, math.ceil(math.dist(start,point)/5))
+            days = set()
+            for step in range(steps+1):
+                t = step/steps
+                day = self.day_at(QPointF(start[0]+(point[0]-start[0])*t,header+start[1]+(point[1]-start[1])*t))
+                if day:
+                    days.add(day.isoformat())
+            self.stamps = [stamp for stamp in self.stamps if stamp['day'] not in days]
+        self.erase_previous = point
+        self.update()
 
     def mousePressEvent(self, event):
-        if event.button() != Qt.MouseButton.LeftButton or event.position().y() < 85:
+        header = self.header_height()
+        if event.button() != Qt.MouseButton.LeftButton or event.position().y() < header:
             return
         self.owner.active_board = self
+        self.setFocus()
         if self.owner.draw_mode:
-            self.current = dict(color=self.owner.color, width=16 if self.owner.highlight.isChecked() else 4, highlight=self.owner.highlight.isChecked(), points=[self.norm(event.position())])
+            self.begin_edit()
+            prefs = self.owner.custom
+            tool = self.owner.tool.currentData()
+            if tool == 'eraser':
+                self.erasing = True
+                self.erase_previous = None
+                self.erase_at(event.position())
+            elif tool == 'stamp':
+                day = self.day_at(event.position())
+                if day:
+                    self.stamps.append(dict(day=day.isoformat(),kind=prefs['stamp'],color=self.owner.color,width=prefs['pen_width'],opacity=prefs['pen_opacity'],text=prefs['stamp_text']))
+                    self.save()
+            else:
+                self.current = dict(color=self.owner.color, width=max(12,prefs['pen_width']) if self.owner.highlight.isChecked() else prefs['pen_width'], opacity=min(45,prefs['pen_opacity']) if self.owner.highlight.isChecked() else prefs['pen_opacity'], highlight=self.owner.highlight.isChecked(), points=[self.norm(event.position())])
         else:
-            index = min(41, int((event.position().y()-85)/((self.height()-85)/6))*7 + int(event.position().x()/(self.width()/7)))
+            index = min(41, int((event.position().y()-header)/((self.height()-header)/6))*7 + int(event.position().x()/(self.width()/7)))
             day = self.days[index]
             if MIN_YEAR <= day.year <= MAX_YEAR:
                 self.owner.select(day)
         self.update()
 
     def mouseMoveEvent(self, event):
+        if self.erasing:
+            self.erase_at(event.position())
         if self.current:
             self.current['points'].append(self.norm(event.position()))
             self.update()
 
     def mouseReleaseEvent(self, event):
+        if event.button() != Qt.MouseButton.LeftButton:
+            return
+        if self.erasing:
+            self.erase_at(event.position())
+            self.erasing = False
+            self.erase_previous = None
+            self.save()
         if self.current:
+            self.current['points'].append(self.norm(event.position()))
             self.strokes.append(self.current)
             self.current = None
             self.redo_stack.clear()
@@ -135,6 +328,7 @@ class MonthBoard(QWidget):
 
     def save(self):
         self.owner.persist(self.key, self.strokes)
+        self.owner.persist(self.stamp_key, self.stamps)
         self.update()
 
 
@@ -142,26 +336,57 @@ class CalendarApp(QMainWindow):
     def __init__(self, store=None):
         super().__init__()
         self.store = store or Store()
+        self.custom = preferences(self.store)
+        self.background_pixmap = load_background(self.custom)
+        self.calendar_surface = self.store.get('module-color:main-calendar','')
+        self.dark = bool(self.store.get('night_mode', False))
+        self.theme_colors = colors(self.dark,self.custom['overrides'])
+        self.day_entries = self.store.load_days()
         today = date.today()
         self.selected = min(max(today, date(MIN_YEAR,1,1)), date(MAX_YEAR,12,31))
         self.year, self.month = self.selected.year, self.selected.month
         self.draw_mode, self.color, self.active_board = False, COLORS[0], None
         self.loading = False
-        self.setWindowTitle('小日历 · 个人日历预览版')
+        self.setWindowTitle('小日历 · v0.4.1 自由桌面')
+        self.setMinimumSize(760, 600)
         self.resize(1320, 880)
-        root = QWidget()
+        root = Background(self)
         self.setCentralWidget(root)
         layout = QVBoxLayout(root)
         layout.setContentsMargins(24,18,24,18)
         header = QHBoxLayout()
-        title = QLabel('小日历  /  把日子慢慢写下来')
-        title.setStyleSheet('font-size:20px;font-weight:600;color:#25334b')
+        title = QLabel('小日历')
+        title.setObjectName('mainTitle')
         header.addWidget(title)
+        self.button('配件商店',lambda: self.body.shop(),header).setToolTip('浏览配件、添加到桌面，管理已添加的配件')
+        self.button('背景与外观',self.open_preferences,header).setToolTip('选择本地图片，调整字体、颜色和标记样式')
+        self.button('操作说明',self.show_help,header)
+        arrange = self.button('整理布局',lambda:None,header)
+        arrange_menu = QMenu(arrange)
+        for label,kind in [('日历与事项左右排列','default'),('全部配件平铺','tile'),('全部配件层叠','cascade')]:
+            arrange_menu.addAction(label,lambda checked=False,k=kind:self.body.arrange(k))
+        arrange.setMenu(arrange_menu)
+        self.layout_lock = QCheckBox('锁定位置')
+        self.layout_lock.setToolTip('锁定后配件不能拖动或缩放，仍可编辑内容')
+        self.layout_lock.setChecked(bool(self.store.get('workspace:locked',False)))
+        self.layout_lock.toggled.connect(lambda locked:self.body.set_locked(locked))
+        self.layout_lock.toggled.connect(lambda locked:arrange.setEnabled(not locked))
+        arrange.setEnabled(not self.layout_lock.isChecked())
+        header.addWidget(self.layout_lock)
         header.addStretch()
         self.clock = QLabel()
-        header.addWidget(self.clock)
+        self.clock.setObjectName('localClock')
+        self.night_mode = QCheckBox('夜间主题')
+        self.night_mode.setChecked(self.dark)
+        self.night_mode.toggled.connect(self.change_theme)
+        header.addWidget(self.night_mode)
         layout.addLayout(header)
-        bar = QHBoxLayout()
+        self.sections = QSplitter(Qt.Orientation.Vertical)
+        self.sections.setChildrenCollapsible(False)
+        self.sections.setHandleWidth(8)
+        layout.addWidget(self.sections, 1)
+        nav_panel = AdaptivePanel(1100, 52)
+        bar = QHBoxLayout(nav_panel)
         self.prev = self.button('← 上个月', lambda: self.navigate(-1), bar)
         self.button('今天', self.go_today, bar)
         self.next = self.button('下个月 →', lambda: self.navigate(1), bar)
@@ -175,6 +400,19 @@ class CalendarApp(QMainWindow):
         bar.addWidget(self.month_box)
         self.year_box.currentIndexChanged.connect(self.jump)
         self.month_box.currentIndexChanged.connect(self.jump)
+        self.auto_cross = QCheckBox('自动标记')
+        self.auto_cross.setToolTip('按自定义中的条件标记日期：已过日期、周末或事项全部完成')
+        self.auto_cross.setChecked(bool(self.store.get('auto_cross_past', False)))
+        self.auto_cross.toggled.connect(self.save_auto_cross)
+        bar.addWidget(self.auto_cross)
+        self.cross_style = QComboBox()
+        for label, value in [('斜线', 'diagonal'), ('叉号', 'cross'), ('横线', 'horizontal'), ('淡化', 'fade')]:
+            self.cross_style.addItem(label, value)
+        self.cross_style.setCurrentIndex(max(0, self.cross_style.findData(self.store.get('past_mark_style', 'diagonal'))))
+        self.cross_style.setToolTip('自动标记的显示样式；条件、颜色和粗细可在“自定义”中设置')
+        self.cross_style.setEnabled(self.auto_cross.isChecked())
+        self.cross_style.currentIndexChanged.connect(self.save_cross_style)
+        bar.addWidget(self.cross_style)
         bar.addStretch()
         self.orientation = QComboBox()
         self.orientation.addItems(['纵向排列', '横向排列'])
@@ -185,32 +423,57 @@ class CalendarApp(QMainWindow):
         self.count.setCurrentIndex(1)
         self.count.currentIndexChanged.connect(self.rebuild)
         bar.addWidget(self.count)
-        layout.addLayout(bar)
-        ink = QHBoxLayout()
-        self.pen_button = self.button('✎ 开启画笔', self.toggle_draw, ink)
+        self.sections.addWidget(self.toolbar_scroll(nav_panel))
+        ink_panel = AdaptivePanel(1100, 52)
+        ink = QHBoxLayout(ink_panel)
+        self.pen_button = self.button('开始标记', self.toggle_draw, ink)
+        self.pen_button.setToolTip('进入标记模式；再次点击返回日期选择和事项编辑')
+        self.tool = QComboBox()
+        for label,value in [('画笔','pen'),('橡皮擦','eraser'),('日期印章','stamp')]:
+            self.tool.addItem(label,value)
+        self.tool.currentIndexChanged.connect(lambda _: self.enable_tool())
+        self.tool.setToolTip('画笔：按住拖动；橡皮擦：删除经过的整笔笔迹；日期印章：点击日期盖章')
+        ink.addWidget(self.tool)
+        self.color_buttons = {}
         for color in COLORS:
             b = self.button('●', lambda checked=False, c=color: self.set_color(c), ink)
-            b.setStyleSheet(f'color:{color};font-size:24px;min-width:30px;padding:2px;')
+            b.setProperty('largeText', True)
+            b.setCheckable(True)
+            b.setToolTip('黑色画笔' if color == '#000000' else color)
+            b.setStyleSheet(f'color:{color};min-width:26px;padding:2px;')
+            self.color_buttons[color] = b
         self.highlight = QCheckBox('荧光笔')
+        self.button('自选色',self.choose_color,ink).setToolTip('为画笔和印章选择任意颜色')
+        self.saved_colors = QComboBox()
+        self.saved_colors.setMinimumWidth(80)
+        self.saved_colors.activated.connect(lambda _:self.set_color(self.saved_colors.currentData()))
+        ink.addWidget(self.saved_colors)
+        self.button('收藏色',self.favorite_color,ink).setToolTip('把当前颜色加入左侧颜色列表，方便再次使用')
         ink.addWidget(self.highlight)
-        self.button('撤销笔迹', self.undo, ink)
+        self.button('撤销标记', self.undo, ink)
         self.button('重做', self.redo, ink)
-        self.button('清空本月笔迹', self.clear_ink, ink)
+        self.button('清空本月笔迹', self.clear_ink, ink).setToolTip('仅清除当前月份的自由笔迹；日期印章可用橡皮擦删除')
         ink.addStretch()
-        self.ink_label = QLabel('点击日期编辑事项；开启画笔后可自由标记')
-        ink.addWidget(self.ink_label)
-        layout.addLayout(ink)
-        body = QHBoxLayout()
+        self.ink_label = QLabel('选日期模式：点击日期编辑事项。配件标题可拖动，右下角可缩放。')
+        self.ink_label.setObjectName('modeHint')
+        self.ink_label.setWordWrap(True)
+        layout.addWidget(self.ink_label)
+        self.sections.addWidget(self.toolbar_scroll(ink_panel))
+        self.body = Workspace(self)
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
-        body.addWidget(self.scroll, 1)
-        panel = QFrame()
-        panel.setFixedWidth(300)
-        panel.setStyleSheet('QFrame {background:white;border-radius:12px;}')
+        self.scroll.setMinimumWidth(280)
+        self.body.addWidget(self.scroll)
+        panel = AdaptivePanel(320, 650)
+        self.editor_panel = panel
+        panel.setMinimumWidth(240)
+        panel.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        panel.setObjectName('editorPanel')
         editor = QVBoxLayout(panel)
         editor.setContentsMargins(18,20,18,20)
         self.day_label = QLabel()
-        self.day_label.setStyleSheet('font-size:20px;font-weight:600;')
+        self.day_label.setStyleSheet('font-weight:600;')
+        self.day_label.setProperty('largeText', True)
         editor.addWidget(self.day_label)
         editor.addWidget(QLabel('当天事项 · 最多六条'))
         editor.addSpacing(14)
@@ -223,6 +486,7 @@ class CalendarApp(QMainWindow):
             field = QLineEdit()
             field.setPlaceholderText('添加事项…')
             field.setMaxLength(120)
+            field.setMinimumWidth(40)
             row.addWidget(done)
             row.addWidget(period)
             row.addWidget(field,1)
@@ -234,15 +498,26 @@ class CalendarApp(QMainWindow):
         editor.addSpacing(16)
         tip = QLabel('早 · 开始新的一天\n午 · 给重要的事留点时间\n晚 · 记录今天的小小收获\n\n直接输入即可保存，清空文字可删除。\n勾选左侧方框，将事项标记为完成。')
         tip.setWordWrap(True)
-        tip.setStyleSheet('color:#8992a6;line-height:1.5;')
+        tip.setProperty('muted', True)
         editor.addWidget(tip)
         editor.addStretch()
-        editor.addWidget(QLabel('本地离线存储  ·  2020 — 2030'))
-        body.addWidget(panel)
-        layout.addLayout(body,1)
+        self.range_label = QLabel(f'本地离线存储  ·  {MIN_YEAR} — {MAX_YEAR}')
+        editor.addWidget(self.range_label)
+        editor_scroll = QScrollArea()
+        editor_scroll.setWidgetResizable(True)
+        editor_scroll.setMinimumWidth(250)
+        editor_scroll.setWidget(panel)
+        self.body.addWidget(editor_scroll)
+        self.sections.addWidget(self.body)
+        self.sections.setSizes([76,76,700])
+        self.body.setSizes([960,320])
         self.status = QLabel('已就绪 · 数据自动保存到本机')
-        self.status.setStyleSheet('color:#8992a6;')
-        layout.addWidget(self.status)
+        self.status.setObjectName('saveStatus')
+        self.status.setProperty('muted', True)
+        status_row = QHBoxLayout()
+        status_row.addWidget(self.status,1)
+        status_row.addWidget(self.clock)
+        layout.addLayout(status_row)
         self.rebuild()
         self.select(self.selected)
         self.last_today = today
@@ -250,6 +525,176 @@ class CalendarApp(QMainWindow):
         self.timer.timeout.connect(self.tick)
         self.timer.start(1000)
         self.tick()
+        self.set_color(self.color)
+        self.restore_layout()
+        self.undo_shortcut = QShortcut(QKeySequence('Ctrl+Z'), self)
+        self.redo_shortcut = QShortcut(QKeySequence('Ctrl+Y'), self)
+        self.undo_shortcut.activated.connect(lambda: self.shortcut_edit(False))
+        self.redo_shortcut.activated.connect(lambda: self.shortcut_edit(True))
+        self.change_theme(self.dark, save=False)
+        self.body.restore_workspace()
+        self.apply_customization()
+        self.refresh_color_list()
+
+    def enable_tool(self):
+        if not self.draw_mode:
+            self.toggle_draw()
+        self.update_mode_hint()
+
+    def update_mode_hint(self):
+        if not self.draw_mode:
+            text = '选日期模式：点击日期编辑事项。配件标题可拖动，右下角可缩放。'
+        else:
+            text = {'pen':'画笔：按住鼠标拖动绘画；颜色在工具栏选择。',
+                    'eraser':'橡皮擦：拖动删除经过的整笔笔迹或日期印章，Ctrl+Z 可撤销。',
+                    'stamp':'日期印章：点击日期盖章；形状与文字在“背景与外观 → 标记与图层”设置。'}[self.tool.currentData()]
+            text += ' 点击“返回选日期”可继续编辑事项。'
+        self.ink_label.setText(text)
+
+    def show_help(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle('小日历 · 操作说明')
+        dialog.resize(640,510)
+        box = QVBoxLayout(dialog)
+        text = QTextEdit()
+        text.setReadOnly(True)
+        text.setHtml('''<h2>按你喜欢的方式安排桌面</h2>
+<p><b>移动和缩放</b>：按住配件标题拖动到任意位置；拖右下角斜线调整大小。配件可以重叠，点击标题放到最前。勾选“锁定位置”可防止误动。</p>
+<p><b>找回配件</b>：打开“配件商店 → 我的桌面”，显示或定位已有配件。标题上的 × 只隐藏配件，内容保留。使用“整理布局”可重新平铺。</p>
+<p><b>背景图片</b>：进入“背景与外观”，选择本地图片，查看预览后保存。图片不明显时，降低“日期格底色不透明度”。</p>
+<p><b>每日事项</b>：在选日期模式点击日期，填写最多六条事项，早/午/晚可自由选择，文字自动保存。左侧勾选表示完成。</p>
+<p><b>绘画与印章</b>：点击“开始标记”，选择画笔、橡皮擦或日期印章。橡皮擦删除经过的整笔笔迹以及日期上的印章。印章形状、文字与粗细在“背景与外观 → 标记与图层”设置。</p>
+<p><b>自动标记</b>：勾选“自动标记”，旁边选择斜线、叉号、横线或淡化。条件可在标记设置里选择已过日期、周末或事项全部完成。</p>
+<p><b>快捷键</b>：Ctrl+Z 撤销、Ctrl+Y 重做、T 回到今天。文本输入时保留正常输入和文本撤销。</p>''')
+        box.addWidget(text)
+        done = QPushButton('知道了，开始使用')
+        done.clicked.connect(dialog.accept)
+        box.addWidget(done)
+        dialog.exec()
+
+    def choose_color(self):
+        color = QColorDialog.getColor(QColor(self.color),self,'选择画笔 / 印章颜色')
+        if color.isValid():
+            self.set_color(color.name())
+            self.custom['recent_colors'] = ([color.name()] + [v for v in self.custom['recent_colors'] if v != color.name()])[:12]
+            self.persist('customization:v1',self.custom)
+            self.refresh_color_list()
+
+    def favorite_color(self):
+        if self.color not in self.custom['favorite_colors']:
+            self.custom['favorite_colors'].append(self.color)
+            self.persist('customization:v1',self.custom)
+            self.refresh_color_list()
+
+    def refresh_color_list(self):
+        self.saved_colors.clear()
+        for prefix,key in [('★','favorite_colors'),('最近','recent_colors')]:
+            for color in self.custom[key]:
+                self.saved_colors.addItem(prefix+' '+color,color)
+
+    def open_preferences(self):
+        dialog = PreferencesDialog(self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.custom = dialog.values
+            self.persist('customization:v1',self.custom)
+            self.background_pixmap = load_background(self.custom)
+            self.change_theme(self.dark,save=False)
+            self.centralWidget().update()
+
+    def apply_customization(self):
+        QApplication.instance().setProperty('calendarCustom',self.custom)
+        font = QFont(self.custom.get('font_family') or FONT_FAMILY)
+        font.setPixelSize(self.custom['font_size'])
+        if QApplication.instance().font() != font:
+            QApplication.instance().setFont(font)
+        for panel in self.findChildren(AdaptivePanel):
+            panel.refresh_font()
+        self.body.refresh_fonts()
+        self.body.apply_colors()
+        for board in self.boards:
+            board.update()
+
+    def change_theme(self, dark, save=True):
+        self.dark = dark
+        self.theme_colors = colors(dark,self.custom['overrides'])
+        configure_style(QApplication.instance(), dark,self.custom['overrides'])
+        self.apply_customization()
+        # A black swatch stays identifiable against the dark toolbar.
+        self.color_buttons['#000000'].setStyleSheet('color:#000000;background:#dce3ee;min-width:26px;padding:2px;')
+        self.set_color(self.color)
+        for board in self.boards:
+            board.update()
+        if save:
+            self.persist('night_mode', dark)
+
+    def save_cross_style(self, *_):
+        self.persist('past_mark_style', self.cross_style.currentData())
+        for board in self.boards:
+            board.update()
+
+    def shortcut_edit(self, redo):
+        field = QApplication.focusWidget()
+        if isinstance(field, (QLineEdit,QPlainTextEdit,QTextEdit)):
+            field.redo() if redo else field.undo()
+        else:
+            self.redo() if redo else self.undo()
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_T and event.modifiers() == Qt.KeyboardModifier.NoModifier and not isinstance(QApplication.focusWidget(), (QLineEdit,QPlainTextEdit,QTextEdit)):
+            self.go_today()
+            event.accept()
+        else:
+            super().keyPressEvent(event)
+
+    def toolbar_scroll(self, panel):
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setMinimumHeight(76)
+        scroll.setWidget(panel)
+        return scroll
+
+    def is_past_day(self, day, today=None):
+        if not self.auto_cross.isChecked() or not self.custom['show_auto']:
+            return False
+        rule = self.custom['rule']
+        if rule == 'weekend':
+            return day.weekday() >= 5
+        if rule == 'completed':
+            rows = self.day_entries.get(day.isoformat(),[])
+            return bool(rows) and all(row['done'] for row in rows)
+        return day < (today or date.today())
+
+    def save_auto_cross(self, enabled):
+        self.persist('auto_cross_past', enabled)
+        self.cross_style.setEnabled(enabled)
+        for board in self.boards:
+            board.update()
+
+    def restore_layout(self):
+        saved = self.store.get('layout:v2', {})
+        if not saved:
+            return
+        self.resize(*saved.get('window', [1320,880]))
+        self.orientation.setCurrentIndex(saved.get('orientation', 0))
+        self.count.setCurrentIndex(saved.get('count', 1))
+        self.body.setSizes(saved.get('body', [960,320]))
+        self.sections.setSizes(saved.get('sections', [64,64,700]))
+        self.month_splitter.setSizes(saved.get('months', [650]*len(self.boards)))
+
+    def closeEvent(self, event):
+        self.body.save_workspace()
+        self.persist('layout:v2', dict(window=[self.width(),self.height()],
+            body=self.body.sizes(), sections=self.sections.sizes(),
+            orientation=self.orientation.currentIndex(), count=self.count.currentIndex(),
+            months=self.month_splitter.sizes()))
+        super().closeEvent(event)
+
+    def resizeEvent(self,event):
+        super().resizeEvent(event)
+        for board in getattr(self,'boards',[]):
+            board.update()
+        if hasattr(self,'body'):
+            self.body.canvas.update()
 
     def button(self, text, callback, layout):
         b = QPushButton(text)
@@ -260,23 +705,37 @@ class CalendarApp(QMainWindow):
     def persist(self, key, value):
         try:
             self.store.put(key, value)
-            self.status.setText('已保存到本机 · ' + str(Path(self.store.db.execute('PRAGMA database_list').fetchone()[2])))
+            self.status.setText('已保存到本机 · 配件与标记自动保存')
+            self.status.setToolTip(str(Path(self.store.db.execute('PRAGMA database_list').fetchone()[2])))
+            return True
         except (OSError, sqlite3.Error) as exc:
             self.status.setText('保存失败，请保留窗口并检查磁盘空间：' + str(exc))
+            return False
 
     def tick(self):
+        global MIN_YEAR, MAX_YEAR
         from datetime import datetime
         self.clock.setText(datetime.now().strftime('本地时间  %Y-%m-%d  %H:%M:%S'))
         if date.today() != self.last_today:
             self.last_today = date.today()
+            if MAX_YEAR != self.last_today.year + 10:
+                MIN_YEAR, MAX_YEAR = self.last_today.year - 10, self.last_today.year + 10
+                self.year = max(MIN_YEAR, min(MAX_YEAR, self.year))
+                self.year_box.blockSignals(True)
+                self.year_box.clear()
+                self.year_box.addItems([str(y) for y in range(MIN_YEAR, MAX_YEAR+1)])
+                self.year_box.blockSignals(False)
+                self.range_label.setText(f'本地离线存储  ·  {MIN_YEAR} — {MAX_YEAR}')
+                self.sync_navigation()
             for b in self.boards:
                 b.update()
 
     def rebuild(self, *_):
-        container = QWidget()
-        box = QHBoxLayout(container) if self.orientation.currentIndex() else QVBoxLayout(container)
-        box.setContentsMargins(0,0,0,0)
-        box.setSpacing(16)
+        previous_sizes = self.month_splitter.sizes() if hasattr(self, 'month_splitter') else []
+        container = QSplitter(Qt.Orientation.Horizontal if self.orientation.currentIndex() else Qt.Orientation.Vertical)
+        container.setChildrenCollapsible(False)
+        container.setHandleWidth(10)
+        self.month_splitter = container
         self.boards = []
         for offset in range(self.count.currentIndex()+1):
             serial = self.year*12+self.month-1+offset
@@ -285,10 +744,11 @@ class CalendarApp(QMainWindow):
                 break
             board = MonthBoard(self,year,month)
             board.setCursor(Qt.CursorShape.CrossCursor if self.draw_mode else Qt.CursorShape.ArrowCursor)
-            box.addWidget(board)
+            container.addWidget(board)
             self.boards.append(board)
         self.active_board = self.boards[0]
         self.scroll.setWidget(container)
+        container.setSizes(previous_sizes if len(previous_sizes) == len(self.boards) else [650]*len(self.boards))
         self.prev.setEnabled((self.year,self.month) > (MIN_YEAR,1))
         self.next.setEnabled((self.year,self.month) < (MAX_YEAR,12))
 
@@ -322,7 +782,7 @@ class CalendarApp(QMainWindow):
     def select(self, day):
         self.selected = day
         self.day_label.setText(f'{day.month} 月 {day.day} 日  周'+ '一二三四五六日'[day.weekday()])
-        saved = self.store.get('day:'+day.isoformat(), [])
+        saved = self.day_entries.get(day.isoformat(), [])
         self.loading = True
         for i,(done,period,field) in enumerate(self.rows):
             row = saved[i] if i<len(saved) else dict(done=False,period=['早','午','晚'][i//2],text='')
@@ -337,89 +797,77 @@ class CalendarApp(QMainWindow):
         if self.loading:
             return
         rows = [dict(done=d.isChecked(),period=p.currentText(),text=f.text().strip()) for d,p,f in self.rows if f.text().strip()]
-        self.persist('day:'+self.selected.isoformat(),rows)
+        if self.persist('day:'+self.selected.isoformat(),rows):
+            self.day_entries[self.selected.isoformat()] = rows
         for b in self.boards:
             b.update()
 
     def toggle_draw(self):
         self.draw_mode = not self.draw_mode
-        self.pen_button.setText('结束绘画' if self.draw_mode else '✎ 开启画笔')
-        self.ink_label.setText('绘画中 · 退出绘画后可选择日期' if self.draw_mode else '点击日期编辑事项；开启画笔后可自由标记')
+        self.pen_button.setText('返回选日期' if self.draw_mode else '开始标记')
+        self.update_mode_hint()
         for b in self.boards:
             b.setCursor(Qt.CursorShape.CrossCursor if self.draw_mode else Qt.CursorShape.ArrowCursor)
 
     def set_color(self,color):
+        if not color:
+            return
         self.color = color
-        self.pen_button.setStyleSheet(f'color:{color};font-weight:bold;')
+        self.pen_button.setStyleSheet('font-weight:bold;')
+        for value, button in self.color_buttons.items():
+            button.setChecked(value == color)
 
     def undo(self):
         b = self.active_board
-        if b.strokes:
-            b.redo_stack.append(b.strokes.pop())
-            b.save()
+        if b.history:
+            b.redo_stack.append(b.snapshot())
+            b.restore_snapshot(b.history.pop())
 
     def redo(self):
         b = self.active_board
         if b.redo_stack:
-            b.strokes.append(b.redo_stack.pop())
-            b.save()
+            b.history.append(b.snapshot())
+            b.restore_snapshot(b.redo_stack.pop())
 
     def clear_ink(self):
         b = self.active_board
         if b.strokes and QMessageBox.question(self,'清空笔迹',f'清空 {b.year} 年 {b.month} 月的全部笔迹？事项不会被删除。') == QMessageBox.StandardButton.Yes:
-            b.redo_stack.extend(reversed(b.strokes))
+            b.begin_edit()
             b.strokes = []
             b.save()
 
 
-def configure_style(app):
-    # Use one complete light palette: native dark-mode text on our white
-    # backgrounds otherwise makes inputs and selectors unreadable.
-    app.setStyle('Fusion')
+def configure_style(app, dark=False, overrides=None):
+    theme = colors(dark,overrides)
+    if not app.property('calendarStyleInitialized'):
+        app.setStyle('Fusion')
+        if sys.platform == 'win32':
+            fonts = Path(os.environ.get('WINDIR', 'C:/Windows')) / 'Fonts'
+            for name in ('msyh.ttc', 'msyhbd.ttc', 'segoeui.ttf'):
+                if (fonts / name).exists():
+                    QFontDatabase.addApplicationFont(str(fonts / name))
+        app.setFont(QFont(FONT_FAMILY, 10))
+        app.setProperty('calendarStyleInitialized', True)
     palette = QPalette()
     for role, color in {
-        QPalette.ColorRole.Window: '#f3f5fa',
-        QPalette.ColorRole.WindowText: '#25334b',
-        QPalette.ColorRole.Base: '#ffffff',
-        QPalette.ColorRole.AlternateBase: '#eef1f7',
-        QPalette.ColorRole.Text: '#25334b',
-        QPalette.ColorRole.Button: '#ffffff',
-        QPalette.ColorRole.ButtonText: '#25334b',
-        QPalette.ColorRole.ToolTipBase: '#25334b',
-        QPalette.ColorRole.ToolTipText: '#ffffff',
-        QPalette.ColorRole.Highlight: '#5369dc',
+        QPalette.ColorRole.Window: theme['background'],
+        QPalette.ColorRole.WindowText: theme['text'],
+        QPalette.ColorRole.Base: theme['surface'],
+        QPalette.ColorRole.AlternateBase: theme['alternate'],
+        QPalette.ColorRole.Text: theme['text'],
+        QPalette.ColorRole.Button: theme['surface'],
+        QPalette.ColorRole.ButtonText: theme['text'],
+        QPalette.ColorRole.ToolTipBase: theme['surface'],
+        QPalette.ColorRole.ToolTipText: theme['text'],
+        QPalette.ColorRole.Highlight: theme['accent'],
         QPalette.ColorRole.HighlightedText: '#ffffff',
-        QPalette.ColorRole.PlaceholderText: '#68758a',
+        QPalette.ColorRole.PlaceholderText: theme['muted'],
     }.items():
         palette.setColor(role, QColor(color))
     for role in (QPalette.ColorRole.Text, QPalette.ColorRole.WindowText, QPalette.ColorRole.ButtonText):
-        palette.setColor(QPalette.ColorGroup.Disabled, role, QColor('#748095'))
+        palette.setColor(QPalette.ColorGroup.Disabled, role, QColor(theme['dim']))
     app.setPalette(palette)
-    if sys.platform == 'win32':
-        fonts = Path(os.environ.get('WINDIR', 'C:/Windows')) / 'Fonts'
-        for name in ('msyh.ttc', 'msyhbd.ttc', 'segoeui.ttf'):
-            if (fonts / name).exists():
-                QFontDatabase.addApplicationFont(str(fonts / name))
-    app.setFont(QFont(FONT_FAMILY, 10))
-    app.setStyleSheet('''
-        QWidget {color:#25334b;}
-        QMainWindow,QDialog,QMessageBox {background:#f3f5fa;}
-        QPushButton,QComboBox,QLineEdit {
-            color:#25334b;background:#ffffff;border:1px solid #cbd3e0;
-            border-radius:6px;padding:7px;
-            selection-background-color:#5369dc;selection-color:#ffffff;
-        }
-        QPushButton:hover {background:#edf0ff;}
-        QPushButton:disabled {color:#748095;background:#edf0f5;}
-        QComboBox QAbstractItemView {
-            color:#25334b;background:#ffffff;
-            selection-color:#ffffff;selection-background-color:#5369dc;
-        }
-        QScrollArea {border:none;}
-        QLabel {color:#536078;}
-        QCheckBox {color:#25334b;spacing:4px;}
-        QToolTip {color:#ffffff;background:#25334b;border:0;}
-    ''')
+    app.setStyleSheet(stylesheet(dark,overrides))
 
 
 def main():
@@ -428,11 +876,42 @@ def main():
         os.environ['QT_QPA_PLATFORM'] = 'offscreen'
     app = QApplication(sys.argv)
     configure_style(app)
-    window = CalendarApp(Store(':memory:') if smoke else None)
+    temporary = None
+    if smoke:
+        import tempfile
+        temporary = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+    window = CalendarApp(Store(Path(temporary.name)/'smoke.sqlite3') if smoke else None)
     window.show()
     if smoke:
+        # Check the packaged image decoder, store and settings UI too. These
+        # paths used to be missed by a main-window-only startup check.
+        from qt_compat import QPixmap
+        from preferences import cache_background_image
+        from module_shop import ModuleShop
+        sample = QPixmap(80,60)
+        sample.fill(QColor('#90b4d4'))
+        path = Path(temporary.name)/'本地背景.png'
+        assert sample.save(str(path),'PNG')
+        window.custom['background_image'] = cache_background_image(window.store,path)
+        window.custom['background_mode'] = 'image'
+        window.background_pixmap = load_background(window.custom)
+        assert not window.background_pixmap.isNull()
+        note = window.body.add_module('notes')
+        note.text.setPlainText('打包检查')
+        shop, settings = ModuleShop(window.body), PreferencesDialog(window)
+        shop.show()
+        settings.show()
+        app.processEvents()
+        assert not shop.grab().isNull() and not settings.grab().isNull()
+        shop.close()
+        settings.close()
         QTimer.singleShot(500, app.quit)
-    sys.exit(app.exec())
+    result = app.exec()
+    if smoke:
+        window.close()
+        window.store.db.close()
+        temporary.cleanup()
+    sys.exit(result)
 
 
 if __name__ == '__main__':

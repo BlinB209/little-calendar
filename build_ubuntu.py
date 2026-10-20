@@ -9,7 +9,7 @@ from pathlib import Path
 import tarfile
 
 ROOT = Path(__file__).resolve().parent
-VERSION = '0.1.1'
+VERSION = '0.4.1'
 OUTPUT = ROOT / 'dist' / f'little-calendar_{VERSION}_all.deb'
 
 
@@ -35,10 +35,13 @@ def build():
     files = [
         ('usr/bin/little-calendar', b'#!/bin/sh\nexec /usr/bin/python3 /usr/share/little-calendar/app.py "$@"\n', 0o755),
         ('usr/share/little-calendar/app.py', (ROOT / 'app.py').read_bytes(), 0o644),
+        ('usr/share/little-calendar/theme.py', (ROOT / 'theme.py').read_bytes(), 0o644),
         ('usr/share/applications/little-calendar.desktop', (ROOT / 'packaging/little-calendar.desktop').read_bytes(), 0o644),
         ('usr/share/icons/hicolor/scalable/apps/little-calendar.svg', (ROOT / 'packaging/little-calendar.svg').read_bytes(), 0o644),
         ('usr/share/doc/little-calendar/README.md', (ROOT / 'UBUNTU.md').read_bytes(), 0o644),
     ]
+    for filename in ('qt_compat.py','workspace.py','free_canvas.py','module_shop.py','preferences.py','markings.py'):
+        files.append(('usr/share/little-calendar/'+filename,(ROOT/filename).read_bytes(),0o644))
     size = (sum(len(content) for _, content, _ in files) + 1023)//1024
     control = f'''Package: little-calendar
 Version: {VERSION}
@@ -49,7 +52,7 @@ Maintainer: Little Calendar Project <maintainer@little-calendar.invalid>
 Depends: python3 (>= 3.10), python3-pyqt6 (>= 6.2), fonts-noto-cjk
 Installed-Size: {size}
 Description: Personal calendar with daily tasks and drawing
- Offline desktop calendar for 2020-2030 with six daily tasks,
+ Offline desktop calendar with a rolling 21-year range and six daily tasks,
  morning/noon/evening categories, colored pens and local storage.
 '''.encode('utf-8')
     md5sums = ''.join(hashlib.md5(content).hexdigest() + '  ' + name + '\n' for name, content, _ in files).encode()

@@ -4,11 +4,11 @@
 
 ## 安装
 
-将 `little-calendar_0.1.1_all.deb` 复制到 Ubuntu，在该文件所在目录打开终端：
+将 `little-calendar_0.4.1_all.deb` 复制到 Ubuntu，在该文件所在目录打开终端：
 
 ```sh
 sudo apt update
-sudo apt install ./little-calendar_0.1.1_all.deb
+sudo apt install ./little-calendar_0.4.1_all.deb
 ```
 
 首次安装需要联网，apt 会安装 Python、Qt 和 Noto 中文字体。若找不到 python3-pyqt6，请先启用 Ubuntu universe 软件源：
@@ -16,16 +16,16 @@ sudo apt install ./little-calendar_0.1.1_all.deb
 ```sh
 sudo add-apt-repository universe
 sudo apt update
-sudo apt install ./little-calendar_0.1.1_all.deb
+sudo apt install ./little-calendar_0.4.1_all.deb
 ```
 
 安装后在应用菜单搜索“小日历”或“Little Calendar”，也可在终端运行 `little-calendar`。
 
 ## 数据与卸载
 
-事项和笔迹保存在 `~/.local/share/LittleCalendar/calendar.sqlite3`；如果设置了 XDG_DATA_HOME，则保存在该目录下的 LittleCalendar 文件夹。
+事项、笔迹、配件和设置保存在 `~/.local/share/LittleCalendar/calendar.sqlite3`；背景图片副本在同目录的 `backgrounds/` 中。如果设置了 XDG_DATA_HOME，则保存在该目录下的 LittleCalendar 文件夹。
 
-关闭两端应用后，可将 Windows 的 `%LOCALAPPDATA%/LittleCalendar/calendar.sqlite3` 复制到上述位置迁移数据；覆盖前备份已有文件。
+关闭两端应用后，可将 Windows 的 `%LOCALAPPDATA%/LittleCalendar/` 目录复制到上述位置迁移数据；覆盖前备份已有文件。背景路径属于本机，跨平台后需要重新选择已复制的图片。
 
 ```sh
 sudo apt remove little-calendar
@@ -44,4 +44,4 @@ little-calendar --smoke-test
 echo $?
 ```
 
-预期退出码为 0。该检查使用内存数据库，不写入个人事项。
+预期退出码为 0。该检查使用临时数据库和临时图片，不写入个人事项，同时检查图片解码、配件商店和外观设置页。
