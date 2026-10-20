@@ -110,6 +110,9 @@ def create_widget(context):
     library.approve('python-note', example_metadata['digest'])
     demo = library.create_widget('python-note', 'sample')
     assert isinstance(demo.widget, QtWidgets.QWidget)
+    demo.widget.findChild(QtWidgets.QPushButton).click()
+    assert demo.context.selected_date.isoformat() in demo.widget.findChild(QtWidgets.QPlainTextEdit).toPlainText()
+    assert not demo.context.errors
     demo.cleanup()
 
     for index, path in enumerate(['../escape.py', '/escape.py', 'C:/escape.py', 'folder\\escape.py']):
