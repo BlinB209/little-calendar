@@ -40,7 +40,7 @@ with tempfile.TemporaryDirectory() as temporary:
     folder = Path(temporary)
     store = Store(folder / 'test.sqlite3')
     library = PluginLibrary(store)
-    assert library.root == folder / 'plugins'
+    assert library.root == (folder / 'plugins').resolve()
     marker = folder / 'executed.txt'
     source = folder / 'source'
     source.mkdir()

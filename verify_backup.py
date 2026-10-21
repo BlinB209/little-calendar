@@ -15,7 +15,7 @@ from backup_ui import BackupDialog
 app = QApplication([])
 configure_style(app)
 with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
-    base = Path(temporary)
+    base = Path(temporary).resolve()
     source,destination = base/'old-computer',base/'new-computer'
     source.mkdir()
     destination.mkdir()

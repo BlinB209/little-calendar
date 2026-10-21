@@ -4,7 +4,7 @@
 
 1. 在 Windows 执行 `python verify_all.py`，然后 `python build_windows.py`；运行生成的 EXE `--smoke-test` 和 `--smoke-test --safe-mode`。
 2. 执行 `python build_ubuntu.py` 生成 DEB。Linux 检查用 `/usr/bin/python3 verify_all.py`，安装 DEB 后运行 `little-calendar --smoke-test`。
-3. 推送 main 或创建 PR 会触发 `.github/workflows/build.yml`：Windows 回归、EXE 打包检查，以及 Ubuntu 22.04 apt 安装和无界面检查。两端产物保存在对应 Actions run。
+3. 推送 main 或创建 PR 会触发 `.github/workflows/build.yml`：Windows 回归、EXE 打包检查，以及 Ubuntu 24.04 apt 安装和无界面检查。两端产物保存在对应 Actions run。
 4. 确认检查成功后，对该提交创建与版本匹配的 `vX.Y.Z` 标签并推送。标签构建成功后，流程生成 SHA256SUMS.txt 和发布说明，自动创建带 EXE / DEB 的 Release **草稿**。不自动将未检查版本公开。
 5. 核对附件、标签、检查结果和发布说明后，在 GitHub 发布草稿并设为 Latest。下载名称使用英文，便于脚本及浏览器兼容。
 

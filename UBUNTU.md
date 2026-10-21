@@ -1,6 +1,6 @@
 # 小日历 Ubuntu 安装说明
 
-目标系统：Ubuntu 22.04 / 24.04 LTS 桌面版。使用系统 Python 3 和 PyQt6，包架构为 all，可用于提供这些依赖的 amd64 / arm64 系统。
+目标系统：Ubuntu 24.04 LTS 桌面版。使用系统 Python 3 和 PyQt6，包架构为 all，可用于提供这些依赖的 amd64 / arm64 系统。Ubuntu 22.04 的默认软件源缺少 python3-pyqt6，因此本 DEB 不再宣称支持 22.04；请升级到 24.04 后安装。
 
 ## 安装
 
@@ -39,7 +39,7 @@ sudo apt remove little-calendar
 
 已校验 Debian 包结构、依赖声明、文件内容和启动脚本权限；Windows 原有功能检查通过。当前构建机器为 Windows，没有 Ubuntu 环境，尚未完成 Ubuntu 上的实际安装和桌面运行测试。
 
-仓库新增 Ubuntu 22.04 Actions 检查：安装系统 Qt 依赖、运行跨平台测试、构建并 apt 安装 DEB，执行无界面启动检查。具体是否通过以对应提交的 Actions 结果为准；无界面检查不等于人工桌面体验验证。
+仓库新增 Ubuntu 24.04 Actions 检查：安装系统 Qt 依赖、运行跨平台测试、构建并 apt 安装 DEB，执行无界面启动检查。具体是否通过以对应提交的 Actions 结果为准；无界面检查不等于人工桌面体验验证。
 
 安装后可执行无界面启动检查：
 
