@@ -13,7 +13,7 @@ def create_widget(context):
     note.setPlainText(context.get_value('text', ''))
     note.textChanged.connect(context.guard(lambda: context.set_value('text', note.toPlainText())))
     button = QtWidgets.QPushButton('插入所选日期')
-    button.clicked.connect(context.guard(lambda: note.appendPlainText(context.selected_date.isoformat())))
+    button.clicked.connect(context.guard(lambda checked=False: note.appendPlainText(context.selected_date.isoformat())))
     layout.addWidget(label)
     layout.addWidget(note)
     layout.addWidget(button)

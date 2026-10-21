@@ -1,14 +1,17 @@
-# 小日历 · v0.5.0 自由桌面与插件库
+# 小日历 · v0.6.0 布局保护与整套备份
 
 本地构建文件位于 `dist` 文件夹；GitHub 发布见 [Releases](https://github.com/BlinB209/little-calendar/releases)。
 
-Windows：双击 `小日历-v0.5.0.exe` 即可运行，不需要安装 Python。本地构建输出为 `dist/小日历-v0.5.0.exe`。
+Windows：双击 `小日历-v0.6.0.exe` 即可运行，不需要安装 Python。本地构建输出为 `dist/小日历-v0.6.0.exe`。
 
 ## 新版操作
 
 - **配件商店**：查看用途和使用方法，点击“添加到桌面”。便签、待办、独立月历、时钟和习惯打卡可重复添加。
 - **第三方插件库**：在商店的“第三方插件”页导入自己或他人的 ZIP 插件包、或源码目录中的 `manifest.json`，确认信任后启用，再添加到桌面。支持停用、打开源码目录、自编辑后重新加载，以及导出可编辑示例。
 - **模块颜色与透明度**：点击模块标题“设置 → 颜色与透明度”，或“我的桌面 → 外观”，独立选择底色、文字色及 15–100% 整体不透明度。100% 为完全不透明，数值越低越透明；支持实时预览、取消还原和恢复主题。
+- **底色透明、文字清晰**：降低“仅底色不透明度”（0–100%），保留“模块不透明度”为 100%；文字不随底色淡化。低对比配色会提示，第三方插件自己绘制的背景由插件控制。
+- **布局保护**：“整理布局”中可撤销/重做移动、缩放和整理，找回屏幕外模块，或关闭拖动吸附。专用快捷键 Ctrl+Alt+Z / Ctrl+Alt+Y，保留最近 50 步，本次会话有效。
+- **整套备份**：顶部“备份与恢复”导出 ZIP，包含事项、笔迹、布局、背景、插件源码及数据。恢复时先校验，再确认整套替换；原数据自动保存为数据目录中的 recovery-*.zip。恢复后 Python 插件默认停用，需在插件库重新确认。
 - **自由摆放**：按住配件标题拖动到任意位置，拖右下角斜线缩放；配件可以重叠，点击标题置于最前。位置和尺寸自动保存。
 - **整理与找回**：顶部“整理布局”可分栏、平铺或层叠。商店的“我的桌面”可以显示、隐藏、重命名和定位配件。× 只隐藏，内容保留。
 - **锁定位置**：禁止拖动和缩放，仍可编辑配件内容。
@@ -19,7 +22,7 @@ Windows：双击 `小日历-v0.5.0.exe` 即可运行，不需要安装 Python。
 
 本地商店不依赖服务器，提供五种内置配件；导入 JSON 可创建使用现有配件类型的模板。Python 插件可创建新的界面与逻辑，多个实例分别保存数据。导入只存储文件；首次运行或源码改变后需要确认，停用保留内容。开发接口、存储路径、依赖范围与示例见 [PLUGINS.md](PLUGINS.md)。
 
-Python 插件在日历进程内运行，具有本机用户权限，并非沙箱，请只启用可信源码。若插件导致启动异常，可用 `小日历-v0.5.0.exe --safe-mode` 禁止第三方代码运行，再去插件库停用。源码使用 `python app.py --safe-mode`，Ubuntu 使用 `little-calendar --safe-mode`。
+Python 插件在日历进程内运行，具有本机用户权限，并非沙箱，请只启用可信源码。若插件导致启动异常，可用 `小日历-v0.6.0.exe --safe-mode` 禁止第三方代码运行，再去插件库停用。源码使用 `python app.py --safe-mode`，Ubuntu 使用 `little-calendar --safe-mode`。
 
 ## 日历功能
 
@@ -35,11 +38,11 @@ Python 插件在日历进程内运行，具有本机用户权限，并非沙箱�
 - 笔迹跟随月份保存，调整窗口后按比例缩放。撤销针对最后点击或绘画的月份。
 - 快捷键：Ctrl+Z 撤销笔迹、Ctrl+Y 重做、T 跳到今天。事项输入框内保留文本编辑的撤销/重做，输入 T 不会跳转日期。
 - 事项启动时载入内存，重绘不查询 SQLite；编辑时自动写入本地数据库。
-- 数据保存在 `%LOCALAPPDATA%/LittleCalendar/calendar.sqlite3`，背景副本在同目录的 `backgrounds/` 中。关闭应用后备份整个目录。跨电脑迁移后需重新选择背景图片，因为当前设置记录本机图片路径。
+- 数据保存在 `%LOCALAPPDATA%/LittleCalendar/calendar.sqlite3`，背景副本在同目录的 `backgrounds/` 中。推荐使用整套 ZIP 备份迁移，恢复会重新定位背景路径；直接手工复制数据库仍可能需要重新选择背景。
 
-尚未提供整套配置、事项与笔迹的导入导出。
+备份最多 512 MiB / 5000 个文件，恢复是整套替换，不合并两个日历。备份不包含历史 recovery ZIP；重要备份请另存。尚未提供多套桌面方案切换与在线插件商店。
 
-Ubuntu：运行 `sudo apt install ./little-calendar_0.5.0_all.deb`，详细安装与验证状态见 [UBUNTU.md](UBUNTU.md)。
+Ubuntu：运行 `sudo apt install ./little-calendar_0.6.0_all.deb`，详细安装与验证状态见 [UBUNTU.md](UBUNTU.md)。
 
 ![夜间主题和叉号划去样式](preview-night.png)
 
@@ -54,3 +57,5 @@ Windows 打包：安装依赖到 `.venv` 后执行 `powershell -ExecutionPolicy 
 Ubuntu 打包：`python build_ubuntu.py`。此包不含本机二进制，依赖由 apt 安装；实际 Ubuntu 桌面运行尚待验证。
 
 Windows 功能检查：`verify.py`、`verify_preview.py`、`verify_layout.py`、`verify_background.py`、`verify_shop.py` 使用临时数据库及 PySide6。插件检查见 `verify_python_plugins.py`、`verify_plugin_library_ui.py`；外观检查见 `verify_module_appearance.py`、`verify_appearance_integration.py`。打包后的 `--smoke-test` 还检查图片解码、商店、外观设置，以及示例插件的导出、导入、动态加载、数据隔离和停用恢复，不改动个人数据。
+
+执行 `python verify_all.py` 运行本平台检查，新增 `verify_backup.py` 验证真实窗口恢复、路径迁移、拒绝损坏包和失败回滚；`verify_stability.py` 验证布局历史、找回和吸附。主窗口与构建共享 `version.py`。自动构建、标签发布与 Release 草稿流程见 [RELEASING.md](RELEASING.md)。

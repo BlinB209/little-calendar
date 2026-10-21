@@ -378,7 +378,7 @@ def export_example(destination):
     manifest = dict(schema=1, api_version=1, id='python-note', title='Python 便签示例',
                     version='1.0.0', kind='python', entry='main.py',
                     description='带独立存储和时间按钮的可编辑 Python 插件示例')
-    source = '''from calendar_plugin_api import QtWidgets\n\ndef create_widget(context):\n    widget = QtWidgets.QWidget()\n    layout = QtWidgets.QVBoxLayout(widget)\n    note = QtWidgets.QPlainTextEdit()\n    note.setPlaceholderText("编辑此插件的 main.py 可以自定义功能")\n    note.setPlainText(context.get_value("text", ""))\n    note.textChanged.connect(context.guard(lambda: context.set_value("text", note.toPlainText())))\n    button = QtWidgets.QPushButton("插入所选日期")\n    button.clicked.connect(context.guard(lambda: note.appendPlainText(context.selected_date.isoformat())))\n    layout.addWidget(note)\n    layout.addWidget(button)\n    return widget\n'''
+    source = '''from calendar_plugin_api import QtWidgets\n\ndef create_widget(context):\n    widget = QtWidgets.QWidget()\n    layout = QtWidgets.QVBoxLayout(widget)\n    note = QtWidgets.QPlainTextEdit()\n    note.setPlaceholderText("编辑此插件的 main.py 可以自定义功能")\n    note.setPlainText(context.get_value("text", ""))\n    note.textChanged.connect(context.guard(lambda: context.set_value("text", note.toPlainText())))\n    button = QtWidgets.QPushButton("插入所选日期")\n    button.clicked.connect(context.guard(lambda checked=False: note.appendPlainText(context.selected_date.isoformat())))\n    layout.addWidget(note)\n    layout.addWidget(button)\n    return widget\n'''
     try:
         with zipfile.ZipFile(destination, 'x', compression=zipfile.ZIP_DEFLATED) as archive:
             archive.writestr(MANIFEST, json.dumps(manifest, ensure_ascii=False, indent=2))

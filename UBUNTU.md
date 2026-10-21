@@ -4,11 +4,11 @@
 
 ## 安装
 
-将 `little-calendar_0.5.0_all.deb` 复制到 Ubuntu，在该文件所在目录打开终端：
+将 `little-calendar_0.6.0_all.deb` 复制到 Ubuntu，在该文件所在目录打开终端：
 
 ```sh
 sudo apt update
-sudo apt install ./little-calendar_0.5.0_all.deb
+sudo apt install ./little-calendar_0.6.0_all.deb
 ```
 
 首次安装需要联网，apt 会安装 Python、Qt 和 Noto 中文字体。若找不到 python3-pyqt6，请先启用 Ubuntu universe 软件源：
@@ -16,7 +16,7 @@ sudo apt install ./little-calendar_0.5.0_all.deb
 ```sh
 sudo add-apt-repository universe
 sudo apt update
-sudo apt install ./little-calendar_0.5.0_all.deb
+sudo apt install ./little-calendar_0.6.0_all.deb
 ```
 
 安装后在应用菜单搜索“小日历”或“Little Calendar”，也可在终端运行 `little-calendar`。
@@ -25,7 +25,7 @@ sudo apt install ./little-calendar_0.5.0_all.deb
 
 事项、笔迹、配件和设置保存在 `~/.local/share/LittleCalendar/calendar.sqlite3`；背景图片副本在同目录的 `backgrounds/` 中。如果设置了 XDG_DATA_HOME，则保存在该目录下的 LittleCalendar 文件夹。
 
-关闭两端应用后，可将 Windows 的 `%LOCALAPPDATA%/LittleCalendar/` 目录复制到上述位置迁移数据；覆盖前备份已有文件。背景路径属于本机，跨平台后需要重新选择已复制的图片。
+推荐通过“备份与恢复”在 Windows 导出 ZIP、在 Ubuntu 恢复，背景路径会重新定位，Python 插件恢复后停用。也可关闭两端应用后手工复制整个数据目录；手工复制时覆盖前备份已有文件，背景图片可能需要重新选择。
 
 ```sh
 sudo apt remove little-calendar
@@ -38,6 +38,8 @@ sudo apt remove little-calendar
 ## 验证状态
 
 已校验 Debian 包结构、依赖声明、文件内容和启动脚本权限；Windows 原有功能检查通过。当前构建机器为 Windows，没有 Ubuntu 环境，尚未完成 Ubuntu 上的实际安装和桌面运行测试。
+
+仓库新增 Ubuntu 22.04 Actions 检查：安装系统 Qt 依赖、运行跨平台测试、构建并 apt 安装 DEB，执行无界面启动检查。具体是否通过以对应提交的 Actions 结果为准；无界面检查不等于人工桌面体验验证。
 
 安装后可执行无界面启动检查：
 

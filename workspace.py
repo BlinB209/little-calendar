@@ -238,6 +238,10 @@ class Workspace(QMainWindow):
         self.plugin_library = PluginLibrary(owner.store)
         self.plugin_errors = {}
         self.style_cache = {}
+        from layout_history import LayoutHistory
+        self.history = LayoutHistory(self)
+        self.snap_enabled = bool(owner.store.get('workspace:snap',True))
+        self.guides = []
         self.docks, self.core = {}, []
         self.restoring = True
         self.arranging = False
@@ -342,8 +346,10 @@ class Workspace(QMainWindow):
     def arrange(self,kind):
         if self.locked:
             return
+        self.history.begin()
         if kind == 'default':
             self.arrange_default()
+            self.history.finish()
             return
         panels = [p for p in self.docks.values() if not p.isHidden()]
         self.auto_layout = False
@@ -361,6 +367,51 @@ class Workspace(QMainWindow):
             self.order = [key for key in self.order if self.docks[key].isHidden()]+[p.objectName() for p in panels]
         self.arranging = False
         self.resize_canvas()
+        self.save_workspace()
+
+        self.history.finish()
+
+    def set_snap(self,value):
+        self.snap_enabled = value
+        self.owner.persist('workspace:snap',value)
+
+    def undo_layout(self):
+        self.history.undo()
+
+    def redo_layout(self):
+        self.history.undo(redo=True)
+
+    def snap_position(self,panel,x,y):
+        self.guides = []
+        if self.snap_enabled:
+            xs = [12,self.desktop.horizontalScrollBar().value()+12]
+            ys = [12,self.desktop.verticalScrollBar().value()+12]
+            for other in self.docks.values():
+                if other is not panel and not other.isHidden():
+                    xs += [other.x(),other.x()+other.width(),other.x()+other.width()+12]
+                    ys += [other.y(),other.y()+other.height(),other.y()+other.height()+12]
+            for axis,value,size,targets in [('x',x,panel.width(),xs),('y',y,panel.height(),ys)]:
+                choices = [(abs(edge-target),target-edge,target) for edge in (value,value+size) for target in targets]
+                distance,delta,target = min(choices)
+                if distance<=8:
+                    if axis=='x': x += delta
+                    else: y += delta
+                    self.guides.append((axis,target))
+        self.canvas.update()
+        return max(0,x),max(0,y)
+
+    def recover_panels(self):
+        if self.locked:
+            return
+        self.history.begin()
+        self.auto_layout = False
+        x,y = self.desktop.horizontalScrollBar().value(),self.desktop.verticalScrollBar().value()
+        width,height = self.desktop.viewport().width(),self.desktop.viewport().height()
+        for i,panel in enumerate(p for p in self.docks.values() if not p.isHidden()):
+            if panel.x()<x or panel.y()<y or panel.x()+panel.width()>x+width or panel.y()+panel.height()>y+height:
+                panel.resize(min(panel.width(),max(240,width-24)),min(panel.height(),max(180,height-24)))
+                panel.move(x+12,y+12)
+        self.history.finish()
         self.save_workspace()
 
     def setSizes(self,sizes):
@@ -462,10 +513,12 @@ class Workspace(QMainWindow):
     def fill_view(self,key):
         if self.locked:
             return
+        self.history.begin()
         self.auto_layout = False
         width,height = self.view_size()
         self.docks[key].setGeometry(self.desktop.horizontalScrollBar().value()+12,self.desktop.verticalScrollBar().value()+12,width-24,height-24)
         self.activate_module(key)
+        self.history.finish()
 
     def install_plugin(self,key):
         if not any(p['id'] == key for p in self.catalog):
@@ -652,6 +705,7 @@ class Workspace(QMainWindow):
         calendar_style = self.get_module_style('main-calendar')
         self.owner.calendar_surface = calendar_style['background']
         self.owner.calendar_foreground = calendar_style['foreground']
+        self.owner.calendar_background_opacity = calendar_style['background_opacity']
         theme = self.owner.theme_colors
         calendar_colors = dict(theme)
         if calendar_style['background'] or calendar_style['foreground']:

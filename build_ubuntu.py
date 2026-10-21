@@ -9,7 +9,7 @@ from pathlib import Path
 import tarfile
 
 ROOT = Path(__file__).resolve().parent
-VERSION = '0.5.0'
+from version import VERSION
 OUTPUT = ROOT / 'dist' / f'little-calendar_{VERSION}_all.deb'
 
 
@@ -42,7 +42,8 @@ def build():
         ('usr/share/doc/little-calendar/PLUGINS.md', (ROOT / 'PLUGINS.md').read_bytes(), 0o644),
     ]
     for filename in ('qt_compat.py','workspace.py','free_canvas.py','module_shop.py','preferences.py','markings.py',
-                     'module_appearance.py','plugin_library_ui.py','plugin_runtime.py','calendar_plugin_api.py'):
+                     'module_appearance.py','plugin_library_ui.py','plugin_runtime.py','calendar_plugin_api.py',
+                     'version.py','backup.py','backup_ui.py','layout_history.py'):
         files.append(('usr/share/little-calendar/'+filename,(ROOT/filename).read_bytes(),0o644))
     for filename in ('manifest.json','main.py','helpers.py','README.md'):
         relative = 'examples/python-note/' + filename

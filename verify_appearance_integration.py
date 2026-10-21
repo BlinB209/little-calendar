@@ -48,7 +48,7 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
     workspace = window.body
     assert workspace.docks[legacy_key].widget().text.toPlainText() == '旧版内容必须保留'
     for key, color in legacy_colors.items():
-        assert workspace.get_module_style(key) == dict(background=color, foreground='', opacity=100)
+        assert workspace.get_module_style(key) == dict(background=color, foreground='', opacity=100, background_opacity=100)
         assert store.get('module-style:' + key, None) is None
 
     # A second instance of the same note module inherits the theme instead of
@@ -63,6 +63,7 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
         legacy_key: dict(background='#e0d7fb', foreground='#351d57', opacity=50),
     }
     for key, style in styles.items():
+        style['background_opacity'] = 100
         assert workspace.set_module_style(key, style)
         assert workspace.get_module_style(key) == style
         assert store.get('module-style:' + key, None) == style

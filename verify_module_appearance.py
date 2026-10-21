@@ -20,7 +20,7 @@ else:
     from PySide6.QtTest import QTest
 
 
-assert normalize_style(None, '#AABBCC') == dict(background='#aabbcc', foreground='', opacity=100)
+assert normalize_style(None, '#AABBCC') == dict(background='#aabbcc', foreground='', opacity=100, background_opacity=100)
 assert normalize_style(dict(DEFAULT_STYLE), '#aabbcc')['background'] == ''
 assert normalize_style({'background': 'red;border:none', 'foreground': '#12345z', 'opacity': None}) == DEFAULT_STYLE
 assert normalize_style({'opacity': -1})['opacity'] == 15
@@ -97,6 +97,20 @@ for actual, top, under in zip(translucent.getRgb()[:3], opaque.getRgb()[:3], des
     assert abs(actual - round((top + under) / 2)) <= 3, (opaque.name(), translucent.name())
 assert first.graphicsEffect().opacity() == .5
 
+# Background-only transparency must reveal the desktop beneath input widgets,
+# while the text color and whole-panel opacity remain unchanged.
+apply_panel_style(first, dict(style, background_opacity=0), LIGHT)
+app.processEvents()
+clear = workspace.grab().toImage().pixelColor(point)
+assert clear.name() == desktop.name(), (clear.name(),desktop.name())
+assert not first.graphicsEffect().isEnabled()
+assert first.note.palette().color(QPalette.ColorRole.Text).name() == '#fff2d4'
+apply_panel_style(first, dict(style, background_opacity=50), LIGHT)
+app.processEvents()
+half = workspace.grab().toImage().pixelColor(point)
+for actual,top,under in zip(half.getRgb()[:3],QColor(style['background']).getRgb()[:3],desktop.getRgb()[:3]):
+    assert abs(actual-round((top+under)/2))<=3,half.name()
+
 # Live edits have no persistent side effects; cancel restores all original
 # colors and full opacity, leaving text entered in the module untouched.
 workspace.preview_module_style('first', DEFAULT_STYLE)
@@ -127,7 +141,7 @@ assert not workspace.writes and dialog.isVisible()
 dialog.inputs['background'].setText('#325678')
 dialog.opacity_slider.setValue(65)
 QTest.mouseClick(dialog.buttons.button(QDialogButtonBox.StandardButton.Save), Qt.MouseButton.LeftButton)
-assert workspace.saved['first'] == dict(background='#325678', foreground='', opacity=65)
+assert workspace.saved['first'] == dict(background='#325678', foreground='', opacity=65, background_opacity=100)
 assert len(workspace.writes) == 1
 
 # Reset is itself a draft; canceling reset restores the saved custom settings.

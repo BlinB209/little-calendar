@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 import PyInstaller.__main__
 
-VERSION = '0.5.0'
+from version import VERSION
 # User-authored plugins are imported after freezing, so static analysis cannot
 # discover their dependencies. Bundle this explicit, documented stdlib baseline.
 PLUGIN_STDLIB = (

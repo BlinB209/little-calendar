@@ -27,6 +27,7 @@ class ResizeCorner(QWidget):
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton and not self.panel.workspace.locked:
+            self.panel.workspace.history.begin()
             self.origin = (event.globalPosition().toPoint(),self.panel.size())
             self.panel.workspace.activate_module(self.panel.objectName(), scroll=False)
             event.accept()
@@ -39,6 +40,7 @@ class ResizeCorner(QWidget):
 
     def mouseReleaseEvent(self, event):
         self.origin = None
+        self.panel.workspace.history.finish()
         self.panel.workspace.schedule_save()
 
 
@@ -109,6 +111,8 @@ class FreePanel(QFrame):
         if watched is self.title:
             kind = event.type()
             if kind == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
+                if not self.workspace.locked:
+                    self.workspace.history.begin()
                 self.workspace.activate_module(self.objectName(),scroll=False)
                 if not self.workspace.locked:
                     self._drag = (event.globalPosition().toPoint(),self.pos())
@@ -116,10 +120,12 @@ class FreePanel(QFrame):
             if kind == QEvent.Type.MouseMove and self._drag is not None:
                 pos = self._drag[1]+event.globalPosition().toPoint()-self._drag[0]
                 self.workspace.auto_layout = False
-                self.move(max(0,pos.x()),max(0,pos.y()))
+                x,y = self.workspace.snap_position(self,pos.x(),pos.y())
+                self.move(x,y)
                 return True
             if kind == QEvent.Type.MouseButtonRelease:
                 self._drag = None
+                self.workspace.history.finish()
                 self.workspace.schedule_save()
                 return True
         return super().eventFilter(watched,event)
@@ -156,6 +162,13 @@ class Canvas(QWidget):
         origin = self.mapTo(root,QPoint(0,0))
         painter.translate(-origin.x(),-origin.y())
         paint_background(painter,QRectF(root.rect()),owner.custom,owner.theme_colors,owner.background_pixmap)
+        painter.translate(origin.x(),origin.y())
+        painter.setPen(self.palette().highlight().color())
+        for axis,value in self.workspace.guides:
+            if axis=='x':
+                painter.drawLine(value,0,value,self.height())
+            else:
+                painter.drawLine(0,value,self.width(),value)
 
 
 class FreeCanvas(QScrollArea):

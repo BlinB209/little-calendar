@@ -7,6 +7,7 @@ import math
 from datetime import date, timedelta
 from pathlib import Path
 from theme import colors, stylesheet
+from version import VERSION
 from workspace import Workspace
 from preferences import preferences, Background, PreferencesDialog, load_background, paint_background
 from markings import stroke_hit
@@ -127,13 +128,15 @@ class MonthBoard(QWidget):
         origin = self.mapTo(root,QPoint(0,0))
         p.save()
         p.translate(-origin.x(),-origin.y())
-        paint_background(p,QRectF(root.rect()),prefs,theme,self.owner.background_pixmap)
+        background_opacity = getattr(self.owner,'calendar_background_opacity',100)
+        if background_opacity == 100:
+            paint_background(p,QRectF(root.rect()),prefs,theme,self.owner.background_pixmap)
         p.restore()
         scale = self.scale_factor()
         p.scale(scale, scale)
         width, height = self.width()/scale, self.height()/scale
         header_color = QColor(theme['surface'])
-        header_color.setAlpha(240)
+        header_color.setAlpha(round(240*background_opacity/100))
         p.fillRect(QRectF(0,0,width,85),header_color)
         p.setFont(self.draw_font(15,True))
         p.setPen(QColor(theme['text']))
@@ -151,7 +154,7 @@ class MonthBoard(QWidget):
             crossed = self.owner.is_past_day(day, today)
             faded = crossed and mark_style == 'fade'
             cell_color = QColor(theme['faded'] if faded else (self.owner.calendar_surface or theme['surface']) if active else theme['alternate'])
-            cell_color.setAlpha(round(255*prefs.get('cell_opacity',92)/100))
+            cell_color.setAlpha(round(255*prefs.get('cell_opacity',92)*background_opacity/10000))
             p.fillRect(rect,cell_color)
             if day == self.owner.selected:
                 p.fillRect(rect, QColor(theme['selected']))
@@ -347,7 +350,7 @@ class CalendarApp(QMainWindow):
         self.year, self.month = self.selected.year, self.selected.month
         self.draw_mode, self.color, self.active_board = False, COLORS[0], None
         self.loading = False
-        self.setWindowTitle('小日历 · v0.5.0 自由桌面' + (' · 安全模式' if '--safe-mode' in sys.argv else ''))
+        self.setWindowTitle(f'小日历 · v{VERSION} 自由桌面' + (' · 安全模式' if '--safe-mode' in sys.argv else ''))
         self.setMinimumSize(760, 600)
         self.resize(1320, 880)
         root = Background(self)
@@ -363,10 +366,19 @@ class CalendarApp(QMainWindow):
         self.button('配件商店',lambda: self.body.shop(),header).setToolTip('浏览配件、添加到桌面，管理已添加的配件')
         self.button('背景与外观',self.open_preferences,header).setToolTip('选择本地图片，调整字体、颜色和标记样式')
         self.button('操作说明',self.show_help,header)
+        self.button('备份与恢复',self.open_backup,header)
         arrange = self.button('整理布局',lambda:None,header)
         arrange_menu = QMenu(arrange)
         for label,kind in [('日历与事项左右排列','default'),('全部配件平铺','tile'),('全部配件层叠','cascade')]:
             arrange_menu.addAction(label,lambda checked=False,k=kind:self.body.arrange(k))
+        arrange_menu.addSeparator()
+        arrange_menu.addAction('撤销布局调整',lambda:self.body.undo_layout())
+        arrange_menu.addAction('重做布局调整',lambda:self.body.redo_layout())
+        arrange_menu.addAction('找回屏幕外模块',lambda:self.body.recover_panels())
+        snap = arrange_menu.addAction('拖动时吸附对齐')
+        snap.setCheckable(True)
+        snap.setChecked(bool(self.store.get('workspace:snap',True)))
+        snap.toggled.connect(lambda value:self.body.set_snap(value))
         arrange.setMenu(arrange_menu)
         self.layout_lock = QCheckBox('锁定位置')
         self.layout_lock.setToolTip('锁定后配件不能拖动或缩放，仍可编辑内容')
@@ -533,6 +545,10 @@ class CalendarApp(QMainWindow):
         self.redo_shortcut = QShortcut(QKeySequence('Ctrl+Y'), self)
         self.undo_shortcut.activated.connect(lambda: self.shortcut_edit(False))
         self.redo_shortcut.activated.connect(lambda: self.shortcut_edit(True))
+        self.layout_undo_shortcut = QShortcut(QKeySequence('Ctrl+Alt+Z'),self)
+        self.layout_redo_shortcut = QShortcut(QKeySequence('Ctrl+Alt+Y'),self)
+        self.layout_undo_shortcut.activated.connect(self.body.undo_layout)
+        self.layout_redo_shortcut.activated.connect(self.body.redo_layout)
         self.change_theme(self.dark, save=False)
         self.body.restore_workspace()
         self.apply_customization()
@@ -563,8 +579,11 @@ class CalendarApp(QMainWindow):
         text.setHtml('''<h2>按你喜欢的方式安排桌面</h2>
 <p><b>移动和缩放</b>：按住配件标题拖动到任意位置；拖右下角斜线调整大小。配件可以重叠，点击标题放到最前。勾选“锁定位置”可防止误动。</p>
 <p><b>找回配件</b>：打开“配件商店 → 我的桌面”，显示或定位已有配件。标题上的 × 只隐藏配件，内容保留。使用“整理布局”可重新平铺。</p>
+<p><b>布局保护</b>：“整理布局”可撤销/重做移动、缩放与整理，也可找回屏幕外模块。拖动时默认吸附对齐，可在同一菜单关闭。快捷键 Ctrl+Alt+Z / Ctrl+Alt+Y 专用于布局，Ctrl+Z / Ctrl+Y 仍用于笔迹或文本。</p>
 <p><b>背景图片</b>：进入“背景与外观”，选择本地图片，查看预览后保存。图片不明显时，降低“日期格底色不透明度”。</p>
 <p><b>模块外观</b>：在配件标题的“设置 → 颜色与透明度”独立选择底色、文字颜色及整体不透明度。100% 为完全不透明，数值越低越透明；取消可恢复原样。</p>
+<p><b>背景透明、文字清晰</b>：降低“仅底色不透明度”，保持“模块不透明度”为 100%，即可让背景透明而保留文字。第三方插件自绘内容由插件控制。</p>
+<p><b>备份与恢复</b>：顶部“备份与恢复”可导出整套 ZIP 备份，包含背景与插件数据。恢复会先备份原数据，再替换当前内容；恢复后的 Python 插件需要重新确认启用。</p>
 <p><b>第三方插件</b>：进入“配件商店 → 第三方插件”，导入 ZIP 或 manifest.json，确认信任后启用，再添加到桌面。“保存可编辑示例”提供 Python 模板；打开源码目录修改后可重新加载。插件拥有本机用户权限。</p>
 <p><b>每日事项</b>：在选日期模式点击日期，填写最多六条事项，早/午/晚可自由选择，文字自动保存。左侧勾选表示完成。</p>
 <p><b>绘画与印章</b>：点击“开始标记”，选择画笔、橡皮擦或日期印章。橡皮擦删除经过的整笔笔迹以及日期上的印章。印章形状、文字与粗细在“背景与外观 → 标记与图层”设置。</p>
@@ -685,13 +704,21 @@ class CalendarApp(QMainWindow):
         self.sections.setSizes(saved.get('sections', [64,64,700]))
         self.month_splitter.setSizes(saved.get('months', [650]*len(self.boards)))
 
-    def closeEvent(self, event):
+    def open_backup(self):
+        from backup_ui import BackupDialog
+        BackupDialog(self).exec()
+
+    def save_session(self):
         self.body.save_workspace()
-        self.body.shutdown_plugins()
         self.persist('layout:v2', dict(window=[self.width(),self.height()],
             body=self.body.sizes(), sections=self.sections.sizes(),
             orientation=self.orientation.currentIndex(), count=self.count.currentIndex(),
             months=self.month_splitter.sizes()))
+
+    def closeEvent(self, event):
+        if not getattr(self,'_skip_save',False):
+            self.save_session()
+        self.body.shutdown_plugins()
         super().closeEvent(event)
 
     def resizeEvent(self,event):
@@ -932,6 +959,18 @@ def main():
         app.processEvents()
         assert not shop.grab().isNull() and not settings.grab().isNull() and not appearance.grab().isNull()
         appearance.reject()
+        from backup import export_backup, PreparedRestore
+        from backup_ui import BackupDialog
+        backup_dialog = BackupDialog(window)
+        backup_dialog.show()
+        app.processEvents()
+        assert not backup_dialog.grab().isNull()
+        window.save_session()
+        backup_path = export_backup(window.store,Path(temporary.name)/'smoke-backup.zip')
+        restored_backup = PreparedRestore(backup_path)
+        assert 'workspace:modules' in restored_backup.entries
+        restored_backup.close()
+        backup_dialog.close()
         shop.close()
         settings.close()
         QTimer.singleShot(500, app.quit)

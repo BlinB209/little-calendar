@@ -15,7 +15,7 @@ else:
     from PySide6.QtWidgets import QGraphicsOpacityEffect, QSlider
 
 
-DEFAULT_STYLE = dict(background='', foreground='', opacity=100)
+DEFAULT_STYLE = dict(background='', foreground='', opacity=100, background_opacity=100)
 
 
 def valid_color(value):
@@ -42,6 +42,10 @@ def normalize_style(value, legacy=''):
     except (TypeError, ValueError, OverflowError):
         opacity = 100
     result['opacity'] = max(15, min(100, opacity))
+    try:
+        result['background_opacity'] = max(0,min(100,int(source.get('background_opacity',100))))
+    except (TypeError,ValueError,OverflowError):
+        pass
     return result
 
 
@@ -70,8 +74,10 @@ def apply_panel_style(panel, style, theme):
     """
     style = normalize_style(style)
     background, foreground = resolved_colors(style, theme)
+    color = QColor(background)
+    rgba = f'rgba({color.red()},{color.green()},{color.blue()},{round(style["background_opacity"]*255/100)})'
     rules = [f'''QFrame[freePanel="true"] {{
-        background:{background}; border:1px solid {theme['border']}; border-radius:9px;
+        background:{rgba}; border:1px solid {theme['border']}; border-radius:9px;
     }}''']
     # A stylesheet on a panel is scoped to that widget subtree, so sibling
     # modules and the settings dialog keep their own colors.
@@ -89,6 +95,13 @@ def apply_panel_style(panel, style, theme):
             QPushButton:checked {{background:{theme['selected']};color:{theme['text']};}}
         ''')
     panel.setStyleSheet('\n'.join(rules))
+    if style['background_opacity']<100:
+        rules.append(f'''QWidget {{background:transparent;color:{foreground};}}
+            QFrame[freePanel="true"] {{background:{rgba};}}
+            QFrame#editorPanel {{background:transparent;}}
+            QAbstractItemView {{background:transparent;}}
+            QComboBox QAbstractItemView {{background:{background};color:{foreground};}}''')
+        panel.setStyleSheet('\n'.join(rules))
     effect = panel.graphicsEffect()
     if style['opacity'] < 100:
         if not isinstance(effect, QGraphicsOpacityEffect):
@@ -167,10 +180,20 @@ class ModuleAppearanceDialog(QDialog):
         opacity_layout.addWidget(self.opacity_slider, 1)
         opacity_layout.addWidget(self.opacity)
         form.addRow('模块不透明度', opacity_row)
+        self.background_opacity = QSpinBox()
+        self.background_opacity.setObjectName('moduleBackgroundOpacity')
+        self.background_opacity.setRange(0,100)
+        self.background_opacity.setSuffix(' %')
+        self.background_opacity.setValue(self.values['background_opacity'])
+        self.background_opacity.valueChanged.connect(self.change_background_opacity)
+        form.addRow('仅底色不透明度',self.background_opacity)
         box.addLayout(form)
         hint = QLabel('100% 完全不透明，数值越低越透明（最低 15%）。\n背景、文字和控件一起变化，可透见桌面背景和下层模块。')
         hint.setWordWrap(True)
         box.addWidget(hint)
+        self.contrast_hint = QLabel()
+        self.contrast_hint.setWordWrap(True)
+        box.addWidget(self.contrast_hint)
         self.error = QLabel()
         self.error.setWordWrap(True)
         self.error.setStyleSheet('color:#c03737;')
@@ -195,6 +218,14 @@ class ModuleAppearanceDialog(QDialog):
     def update_swatches(self):
         theme = self.workspace.owner.theme_colors
         background, foreground = resolved_colors(self.values, theme)
+        def luminance(value):
+            c = QColor(value)
+            linear = [x/12.92 if x<=.04045 else ((x+.055)/1.055)**2.4 for x in (c.redF(),c.greenF(),c.blueF())]
+            return sum(a*b for a,b in zip(linear,(.2126,.7152,.0722)))
+        a,b = sorted((luminance(background),luminance(foreground)))
+        ratio = (b+.05)/(a+.05)
+        self.contrast_hint.setText(('文字与底色对比偏低，建议选择“自动配色”。' if ratio<4.5 else '')+
+            ('\n仅底色透明不影响文字；透明背景的实际可读性取决于下层内容。' if self.values['background_opacity']<100 else ''))
         for name, color in (('background', background), ('foreground', foreground)):
             self.swatches[name].setStyleSheet(
                 f'background:{color};color:{contrasting_text(color)};border:1px solid {theme["border"]};padding:7px;')
@@ -219,12 +250,19 @@ class ModuleAppearanceDialog(QDialog):
         self.values['opacity'] = value
         self.preview()
 
+    def change_background_opacity(self,value):
+        self.values['background_opacity'] = value
+        self.preview()
+
     def preview(self):
         self.workspace.preview_module_style(self.key, dict(self.values))
         self.update_swatches()
 
     def reset_style(self):
         self.values = dict(DEFAULT_STYLE)
+        self.background_opacity.blockSignals(True)
+        self.background_opacity.setValue(100)
+        self.background_opacity.blockSignals(False)
         for edit in self.inputs.values():
             edit.blockSignals(True)
             edit.clear()

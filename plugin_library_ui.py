@@ -188,6 +188,16 @@ class PythonPluginLibraryPage(QScrollArea):
         self.description.setText(entry.get('description') or '作者未提供用途说明。')
         self.state.setText(('已启用，可以添加到桌面。' if enabled else '已停用，文件及已保存数据保留。') if entry.get('approved') else '已存入模组库，尚未确认运行当前源码。')
         failure = entry.get('error') or getattr(self.workspace, 'plugin_errors', {}).get(key, '')
+        instances = [panel.widget().instance for panel in self.workspace.docks.values()
+                     if getattr(panel.widget(),'record',{}).get('plugin')==key and hasattr(panel.widget(),'instance')]
+        callback_errors = [error for instance in instances if instance for error in instance.context.errors]
+        if callback_errors:
+            failure = '\n'.join(callback_errors[-10:])
+        if enabled and entry.get('approved') and not failure:
+            running = sum(instance is not None for instance in instances)
+            self.state.setText(f'正常运行：{running} 个实例。' if running else '已启用，尚未创建运行实例；点击“添加到桌面”。')
+        elif enabled and not entry.get('approved') and not failure:
+            self.state.setText('源码已修改或尚未确认，当前源码需要重新确认。正在运行的旧实例将在重新加载后更新。')
         if self.safe_mode:
             self.state.setText('安全模式：当前未运行插件。可停用原有启用状态，或正常启动日历后继续使用。')
         elif entry.get('error'):
