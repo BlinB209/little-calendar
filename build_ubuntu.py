@@ -5,7 +5,7 @@ No native binaries are cross-compiled: Ubuntu provides Python and Qt via apt.
 import gzip
 import hashlib
 import io
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import tarfile
 
 ROOT = Path(__file__).resolve().parent
@@ -16,6 +16,15 @@ OUTPUT = ROOT / 'dist' / f'little-calendar_{VERSION}_all.deb'
 def tar_gz(files):
     output = io.BytesIO()
     with tarfile.open(fileobj=output, mode='w', format=tarfile.GNU_FORMAT) as archive:
+        # dpkg does not synthesize missing directories from file paths.
+        directories = {str(parent) for name,_,_ in files for parent in PurePosixPath(name).parents if str(parent)!='.'}
+        for name in sorted(directories,key=lambda name:(name.count('/'),name)):
+            info = tarfile.TarInfo('./'+name)
+            info.type = tarfile.DIRTYPE
+            info.mode,info.mtime = 0o755,0
+            info.uid = info.gid = 0
+            info.uname = info.gname = 'root'
+            archive.addfile(info)
         for name, content, mode in files:
             info = tarfile.TarInfo('./' + name)
             info.size, info.mode, info.mtime = len(content), mode, 0
@@ -82,6 +91,9 @@ Description: Customizable personal calendar with local Python plugins
     assert cursor == len(blob) and recovered['debian-binary'] == b'2.0\n'
     with tarfile.open(fileobj=io.BytesIO(recovered['data.tar.gz']), mode='r:gz') as archive:
         for name, content, mode in files:
+            for parent in PurePosixPath(name).parents:
+                if str(parent)!='.':
+                    assert archive.getmember('./'+str(parent)).isdir()
             assert archive.getmember('./'+name).mode == mode
             assert archive.extractfile('./'+name).read() == content
     with tarfile.open(fileobj=io.BytesIO(recovered['control.tar.gz']), mode='r:gz') as archive:

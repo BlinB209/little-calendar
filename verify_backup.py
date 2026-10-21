@@ -133,4 +133,17 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
     assert (destination/'plugins'/'packages'/'python-note'/'main.py').is_file()
     prepared.close()
     restored.store.db.close()
+    # A new installation has no explicit installed-list key. Restoring it must
+    # retain the default built-in modules instead of disabling all of them.
+    clean = base/'clean'
+    clean.mkdir()
+    clean_store = Store(clean/'calendar.sqlite3')
+    clean_archive = export_backup(clean_store,base/'clean.zip')
+    clean_prepared = PreparedRestore(clean_archive)
+    restore_backup(clean_store,clean_prepared)
+    clean_window = CalendarApp(clean_store)
+    assert set(clean_window.body.installed)=={'notes','tasks','month','clock','habit'}
+    clean_window.close()
+    clean_store.db.close()
+    clean_prepared.close()
 print('PASS: backup migration, actual restore/cancel UI, background relocation, plugin trust reset, recovery copy, checksum/traversal rejection and rollback')

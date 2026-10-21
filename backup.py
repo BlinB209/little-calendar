@@ -142,6 +142,7 @@ def restore_backup(store,prepared):
     # Source is read and verified first. Build replacement trees on the same disk.
     staging = Path(tempfile.mkdtemp(prefix='.restore-',dir=root))
     moved,installed = [],[]
+    can_cleanup = False
     try:
         for folder in ('backgrounds','plugins'):
             source = prepared.root/folder
@@ -156,7 +157,8 @@ def restore_backup(store,prepared):
         python_ids = {p.name for p in (staging/'plugins'/'packages').iterdir()} if (staging/'plugins'/'packages').exists() else set()
         records = json.loads(values.get('workspace:modules','[]'))
         python_ids.update(r['plugin'] for r in records if r.get('kind')=='python')
-        values['plugins:installed'] = json.dumps([key for key in catalog if key not in python_ids])
+        if 'plugins:installed' in values:
+            values['plugins:installed'] = json.dumps([key for key in catalog if key not in python_ids])
         prefs = json.loads(values.get('customization:v1','{}'))
         if prefs.get('background_image'):
             relative = PurePosixPath(prefs['background_image'])
@@ -174,12 +176,18 @@ def restore_backup(store,prepared):
         with store.db:
             store.db.execute('DELETE FROM entries')
             store.db.executemany('INSERT INTO entries VALUES (?,?)',values.items())
+        can_cleanup = True
     except BaseException:
-        for folder in reversed(installed):
-            shutil.rmtree(root/folder)
-        for folder in reversed(moved):
-            (staging/(folder+'-old')).rename(root/folder)
+        try:
+            for folder in reversed(installed):
+                shutil.rmtree(root/folder)
+            for folder in reversed(moved):
+                (staging/(folder+'-old')).rename(root/folder)
+        except OSError as error:
+            raise RuntimeError(f'恢复中断，部分原文件保留在 {staging}；完整原数据备份：{recovery}') from error
+        can_cleanup = True
         raise
     finally:
-        shutil.rmtree(staging)
+        if can_cleanup:
+            shutil.rmtree(staging,ignore_errors=True)
     return recovery

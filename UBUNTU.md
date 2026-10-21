@@ -37,7 +37,7 @@ sudo apt remove little-calendar
 
 ## 验证状态
 
-已校验 Debian 包结构、依赖声明、文件内容和启动脚本权限；Windows 原有功能检查通过。当前构建机器为 Windows，没有 Ubuntu 环境，尚未完成 Ubuntu 上的实际安装和桌面运行测试。
+本机构建会校验 Debian 包结构、目录条目、依赖声明、文件内容和启动脚本权限。当前本机为 Windows，没有 Ubuntu 桌面环境；人工桌面运行测试尚待完成。远端安装检查见下面的 Actions 流程。
 
 仓库新增 Ubuntu 24.04 Actions 检查：安装系统 Qt 依赖、运行跨平台测试、构建并 apt 安装 DEB，执行无界面启动检查。具体是否通过以对应提交的 Actions 结果为准；无界面检查不等于人工桌面体验验证。
 
