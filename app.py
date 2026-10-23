@@ -367,6 +367,7 @@ class CalendarApp(QMainWindow):
         self.button('背景与外观',self.open_preferences,header).setToolTip('选择本地图片，调整字体、颜色和标记样式')
         self.button('操作说明',self.show_help,header)
         self.button('备份与恢复',self.open_backup,header)
+        self.button('导入导出',self.open_exchange,header).setToolTip('把事项导出为 .ics 日历或 .csv 表格，也可从 .csv 合并导入')
         arrange = self.button('整理布局',lambda:None,header)
         arrange_menu = QMenu(arrange)
         for label,kind in [('日历与事项左右排列','default'),('全部配件平铺','tile'),('全部配件层叠','cascade')]:
@@ -427,6 +428,7 @@ class CalendarApp(QMainWindow):
         self.cross_style.setEnabled(self.auto_cross.isChecked())
         self.cross_style.currentIndexChanged.connect(self.save_cross_style)
         bar.addWidget(self.cross_style)
+        self.button('搜索事项',self.open_search,bar).setToolTip('在全部日期中搜索事项并跳转（Ctrl+F）')
         bar.addStretch()
         self.orientation = QComboBox()
         self.orientation.addItems(['纵向排列', '横向排列'])
@@ -549,6 +551,8 @@ class CalendarApp(QMainWindow):
         self.layout_redo_shortcut = QShortcut(QKeySequence('Ctrl+Alt+Y'),self)
         self.layout_undo_shortcut.activated.connect(self.body.undo_layout)
         self.layout_redo_shortcut.activated.connect(self.body.redo_layout)
+        self.search_shortcut = QShortcut(QKeySequence('Ctrl+F'), self)
+        self.search_shortcut.activated.connect(self.open_search)
         self.change_theme(self.dark, save=False)
         self.body.restore_workspace()
         self.apply_customization()
@@ -584,11 +588,13 @@ class CalendarApp(QMainWindow):
 <p><b>模块外观</b>：在配件标题的“设置 → 颜色与透明度”独立选择底色、文字颜色及整体不透明度。100% 为完全不透明，数值越低越透明；取消可恢复原样。</p>
 <p><b>背景透明、文字清晰</b>：降低“仅底色不透明度”，保持“模块不透明度”为 100%，即可让背景透明而保留文字。第三方插件自绘内容由插件控制。</p>
 <p><b>备份与恢复</b>：顶部“备份与恢复”可导出整套 ZIP 备份，包含背景与插件数据。恢复会先备份原数据，再替换当前内容；恢复后的 Python 插件需要重新确认启用。</p>
+<p><b>导入导出</b>：顶部“导入导出”把事项导出为 .ics 日历文件或 .csv 表格。从 .csv 导入只新增、不删除，按日期+时段+文字去重，每日最多六条，逐行报告跳过原因，并自动备份原数据。</p>
+<p><b>搜索事项</b>：导航栏“搜索事项”（Ctrl+F）跨全部日期查找，可按早/午/晚和“只看未完成”过滤，双击结果跳到该日期。</p>
 <p><b>第三方插件</b>：进入“配件商店 → 第三方插件”，导入 ZIP 或 manifest.json，确认信任后启用，再添加到桌面。“保存可编辑示例”提供 Python 模板；打开源码目录修改后可重新加载。插件拥有本机用户权限。</p>
 <p><b>每日事项</b>：在选日期模式点击日期，填写最多六条事项，早/午/晚可自由选择，文字自动保存。左侧勾选表示完成。</p>
 <p><b>绘画与印章</b>：点击“开始标记”，选择画笔、橡皮擦或日期印章。橡皮擦删除经过的整笔笔迹以及日期上的印章。印章形状、文字与粗细在“背景与外观 → 标记与图层”设置。</p>
 <p><b>自动标记</b>：勾选“自动标记”，旁边选择斜线、叉号、横线或淡化。条件可在标记设置里选择已过日期、周末或事项全部完成。</p>
-<p><b>快捷键</b>：Ctrl+Z 撤销、Ctrl+Y 重做、T 回到今天。文本输入时保留正常输入和文本撤销。</p>''')
+<p><b>快捷键</b>：Ctrl+Z 撤销、Ctrl+Y 重做、T 回到今天、Ctrl+F 搜索事项、Ctrl+Alt+Z / Ctrl+Alt+Y 撤销/重做布局调整。文本输入时保留正常输入和文本撤销。</p>''')
         box.addWidget(text)
         done = QPushButton('知道了，开始使用')
         done.clicked.connect(dialog.accept)
@@ -707,6 +713,21 @@ class CalendarApp(QMainWindow):
     def open_backup(self):
         from backup_ui import BackupDialog
         BackupDialog(self).exec()
+
+    def open_exchange(self):
+        from exchange_ui import ExchangeDialog
+        ExchangeDialog(self).exec()
+
+    def open_search(self):
+        from entry_search import SearchDialog
+        SearchDialog(self).exec()
+
+    def reload_entries(self):
+        """Re-read entry data after an import; ink, workspace and plugins are untouched."""
+        self.day_entries = self.store.load_days()
+        self.select(self.selected)
+        for board in self.boards:
+            board.update()
 
     def save_session(self):
         self.body.save_workspace()
@@ -971,6 +992,26 @@ def main():
         assert 'workspace:modules' in restored_backup.entries
         restored_backup.close()
         backup_dialog.close()
+        from exchange_ui import ExchangeDialog
+        from exchange import export_ics, export_csv, import_csv
+        exchange_dialog = ExchangeDialog(window)
+        exchange_dialog.show()
+        window.rows[0][2].setText('导入导出检查')
+        app.processEvents()
+        assert not exchange_dialog.grab().isNull()
+        ics_path = export_ics(window.store,Path(temporary.name)/'导出.ics')
+        csv_path = export_csv(window.store,Path(temporary.name)/'导出.csv')
+        assert ics_path.stat().st_size > 0 and b'BEGIN:VCALENDAR' in ics_path.read_bytes()
+        assert csv_path.stat().st_size > 0 and '导入导出检查' in csv_path.read_text(encoding='utf-8-sig')
+        assert import_csv(window.store,csv_path,min_year=MIN_YEAR,max_year=MAX_YEAR)['added'] == []
+        upcoming = (window.selected+timedelta(days=1)).isoformat()
+        extra = Path(temporary.name)/'导入.csv'
+        extra.write_text('date,period,text,done\n'+upcoming+',早,来自表格,0\n',encoding='utf-8')
+        written = import_csv(window.store,extra,min_year=MIN_YEAR,max_year=MAX_YEAR)
+        assert len(written['added']) == 1 and written['skipped'] == []
+        window.reload_entries()
+        assert window.day_entries[upcoming][0]['text'] == '来自表格'
+        exchange_dialog.close()
         shop.close()
         settings.close()
         QTimer.singleShot(500, app.quit)

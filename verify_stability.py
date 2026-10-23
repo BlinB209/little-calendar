@@ -61,6 +61,27 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as folder:
     content = panel.findChild(QWidget,'editorPanel')
     assert content is not None
     assert content.palette().window().color().alpha()==0
+    # Layout history persists: the same steps stay undoable after a restart.
+    before_move = w.history.snapshot()
+    w.history.begin()
+    panel.move(260,180)
+    w.history.finish()
+    assert w.history.snapshot() != before_move
     window.close()
     window.store.db.close()
-print('PASS: layout undo/redo, arrange history, offscreen recovery, optional snapping, locking and separate background opacity')
+    reopened = Store(Path(folder)/'calendar.sqlite3')
+    second = CalendarApp(reopened)
+    second.show()
+    app.processEvents()
+    restored_panel = second.body.docks['daily-editor']
+    assert (restored_panel.x(),restored_panel.y()) == (260,180), 'geometry should restore from the saved layout'
+    assert second.body.history.past, 'layout history was not persisted'
+    assert second.body.history.past[-1]['panels']['daily-editor'][:2] == before_move['panels']['daily-editor'][:2]
+    second.body.undo_layout()
+    assert (restored_panel.x(),restored_panel.y()) == tuple(before_move['panels']['daily-editor'][:2])
+    assert second.body.history.future, 'undo should push onto the redo stack'
+    second.body.redo_layout()
+    assert (restored_panel.x(),restored_panel.y()) == (260,180)
+    second.close()
+    reopened.db.close()
+print('PASS: layout undo/redo, arrange history, offscreen recovery, optional snapping, locking, separate background opacity and persisted history')

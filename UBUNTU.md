@@ -4,11 +4,11 @@
 
 ## 安装
 
-将 `little-calendar_0.6.0_all.deb` 复制到 Ubuntu，在该文件所在目录打开终端：
+将 `little-calendar_0.7.0_all.deb` 复制到 Ubuntu，在该文件所在目录打开终端：
 
 ```sh
 sudo apt update
-sudo apt install ./little-calendar_0.6.0_all.deb
+sudo apt install ./little-calendar_0.7.0_all.deb
 ```
 
 首次安装需要联网，apt 会安装 Python、Qt 和 Noto 中文字体。若找不到 python3-pyqt6，请先启用 Ubuntu universe 软件源：
@@ -16,7 +16,7 @@ sudo apt install ./little-calendar_0.6.0_all.deb
 ```sh
 sudo add-apt-repository universe
 sudo apt update
-sudo apt install ./little-calendar_0.6.0_all.deb
+sudo apt install ./little-calendar_0.7.0_all.deb
 ```
 
 安装后在应用菜单搜索“小日历”或“Little Calendar”，也可在终端运行 `little-calendar`。
@@ -25,7 +25,7 @@ sudo apt install ./little-calendar_0.6.0_all.deb
 
 事项、笔迹、配件和设置保存在 `~/.local/share/LittleCalendar/calendar.sqlite3`；背景图片副本在同目录的 `backgrounds/` 中。如果设置了 XDG_DATA_HOME，则保存在该目录下的 LittleCalendar 文件夹。
 
-推荐通过“备份与恢复”在 Windows 导出 ZIP、在 Ubuntu 恢复，背景路径会重新定位，Python 插件恢复后停用。也可关闭两端应用后手工复制整个数据目录；手工复制时覆盖前备份已有文件，背景图片可能需要重新选择。
+推荐通过“备份与恢复”在 Windows 导出 ZIP、在 Ubuntu 恢复，背景路径会重新定位，Python 插件恢复后停用。若只想搬事项，也可用“导入导出”导出 .ics 或 .csv，在另一端从 .csv 合并导入（只新增、不删除，每日最多六条）。也可关闭两端应用后手工复制整个数据目录；手工复制时覆盖前备份已有文件，背景图片可能需要重新选择。
 
 ```sh
 sudo apt remove little-calendar
