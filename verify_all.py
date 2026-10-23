@@ -1,10 +1,10 @@
-"""Run checks on both Qt bindings; each test gets a fresh QApplication/process."""
+﻿"""Run checks on both Qt bindings; each test gets a fresh QApplication/process."""
 import subprocess
 import sys
 
 common = ['verify_python_plugins.py','verify_plugin_lifecycle.py','verify_module_appearance.py',
           'verify_appearance_integration.py','verify_backup.py','verify_exchange.py','verify_search.py',
-          'verify_reminder.py','verify_autobackup.py','verify_tray.py','verify_review.py',
+          'verify_reminder.py','verify_autobackup.py','verify_tray.py','verify_entry_times.py','verify_review.py',
           'verify_templates.py','verify_stability.py']
 windows = ['verify.py','verify_preview.py','verify_layout.py','verify_background.py','verify_shop.py','verify_plugin_library_ui.py']
 for filename in common + (windows if sys.platform=='win32' else []):

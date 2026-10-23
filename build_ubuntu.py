@@ -1,4 +1,4 @@
-"""Build an architecture-independent Debian package using standard Python.
+﻿"""Build an architecture-independent Debian package using standard Python.
 
 No native binaries are cross-compiled: Ubuntu provides Python and Qt via apt.
 """
@@ -53,7 +53,7 @@ def build():
     for filename in ('qt_compat.py','workspace.py','free_canvas.py','module_shop.py','preferences.py','markings.py',
                      'module_appearance.py','plugin_library_ui.py','plugin_runtime.py','calendar_plugin_api.py',
                      'version.py','backup.py','backup_ui.py','layout_history.py','exchange.py','exchange_ui.py',
-                     'entry_search.py','reminders.py','autobackup.py','status_tray.py',
+                     'entry_search.py','entry_times.py','entry_times_ui.py','reminders.py','autobackup.py','status_tray.py',
                      'review.py','review_ui.py','templates.py','templates_ui.py'):
         files.append(('usr/share/little-calendar/'+filename,(ROOT/filename).read_bytes(),0o644))
     for filename in ('manifest.json','main.py','helpers.py','README.md'):

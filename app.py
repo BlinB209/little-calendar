@@ -502,6 +502,10 @@ class CalendarApp(QMainWindow):
         self.template_button.setToolTip('把常用事项存成模板，一键插入这一天')
         self.template_button.clicked.connect(self.open_templates)
         day_row.addWidget(self.template_button)
+        self.times_button = QPushButton('定时…')
+        self.times_button.setToolTip('给当天的事项设置提醒时间（HH:MM）')
+        self.times_button.clicked.connect(self.open_entry_times)
+        day_row.addWidget(self.times_button)
         editor.addLayout(day_row)
         editor.addSpacing(14)
         self.rows = []
@@ -579,7 +583,9 @@ class CalendarApp(QMainWindow):
             try:
                 self.tray = StatusTray(self, dict(show=self.show_window, today=self.go_today,
                                                   search=self.open_search, backup=self.open_backup,
-                                                  pause=self.pause_reminder, quit=self.quit_app))
+                                                  pause=self.pause_reminder, snooze=self.snooze_reminders,
+                                                  message_clicked=self.show_reminder_target,
+                                                  quit=self.quit_app))
             except Exception:
                 self.tray = None
         if self.tray is not None:
@@ -602,23 +608,53 @@ class CalendarApp(QMainWindow):
         pause_today(self.store, date.today())
         self.status.setText('今天不再提醒，明天按设置继续。')
 
+    def snooze_reminders(self, minutes=10):
+        from reminders import snooze
+        state = snooze(self.store, minutes)
+        self.status.setText(f"已推迟提醒到 {state['snooze'][11:16]}。")
+
+    def show_reminder_target(self):
+        self.show_window()
+        self.go_today()
+
+    def _notify(self, title, body):
+        """Tray balloon when possible, otherwise the status bar; True when shown."""
+        shown = False
+        if self.tray is not None:
+            try:
+                shown = bool(self.tray.isVisible() and self.tray.notify(title, body))
+            except Exception:
+                shown = False
+        if not shown:
+            self.status.setText('提醒：' + title + (f' · {body}' if body else ''))
+        return shown
+
     def check_reminder(self, now=None):
-        """Fire at most one reminder per minute slot and per day."""
-        from reminders import due, load_state, mark_fired, summary
+        """Per-entry times first, then the daily summary; once per minute slot."""
+        from reminders import add_fired, due, load_state, mark_fired, snoozed, summary
+        import entry_times
         now = now or datetime.now()
         slot = now.strftime('%Y%m%d%H%M')
         if slot == self._reminder_slot:
             return False
         self._reminder_slot = slot
-        count, text = summary(self.day_entries, now.date())
-        if not due(self.custom, load_state(self.store), now, count > 0):
+        state = load_state(self.store)
+        if snoozed(state, now):
             return False
-        title = f'今天还有 {count} 件未完成' if count else '今天没有未完成的事项'
-        shown = bool(self.tray is not None and self.tray.isVisible() and self.tray.notify(title, text))
-        if not shown:
-            self.status.setText('提醒：' + title + (f' · {text}' if text else ''))
-        mark_fired(self.store, now.date())
-        return True
+        fired = False
+        pending = entry_times.pending(self.day_entries, now.date(), now, state.get('fired', []))
+        if pending:
+            title, body = entry_times.message(pending)
+            self._notify(title, body)
+            add_fired(self.store, [item['key'] for item in pending], now.date())
+            fired = True
+        count, text = summary(self.day_entries, now.date())
+        if due(self.custom, load_state(self.store), now, count > 0):
+            title = f'今天还有 {count} 件未完成' if count else '今天没有未完成的事项'
+            self._notify(title, text)
+            mark_fired(self.store, now.date())
+            fired = True
+        return fired
 
     def schedule_auto_backup(self):
         QTimer.singleShot(30000, self.run_auto_backup)
@@ -667,6 +703,7 @@ class CalendarApp(QMainWindow):
 <p><b>背景透明、文字清晰</b>：降低“仅底色不透明度”，保持“模块不透明度”为 100%，即可让背景透明而保留文字。第三方插件自绘内容由插件控制。</p>
 <p><b>备份与恢复</b>：顶部“备份与恢复”可导出整套 ZIP 备份，包含背景与插件数据。恢复会先备份原数据，再替换当前内容；恢复后的 Python 插件需要重新确认启用。</p>
 <p><b>导入导出</b>：顶部“导入导出”把事项导出为 .ics 日历文件或 .csv 表格。从 .csv 导入只新增、不删除，按日期+时段+文字去重，每日最多六条，逐行报告跳过原因，并自动备份原数据。</p>
+<p><b>定时提醒</b>：编辑面板“定时…”给当天事项设置 HH:MM 提醒时间，留空表示不提醒。到点用托盘气泡提示，点击气泡打开窗口并跳到今天；同一分钟的多条合并成一条，错过时间会在下次打开后补提醒；托盘菜单可“稍后提醒（10 分钟）”。</p>
 <p><b>提醒与托盘</b>：设置窗口的“提醒”页签，选择提醒时间与是否只在工作日提醒；到点用托盘气泡提示当天未完成的事项，没有未完成就不打扰。托盘菜单可显示窗口、搜索、备份、暂停今天的提醒或退出；“关闭窗口时”可选退出或最小化到托盘，系统没有托盘时自动退回退出。</p>
 <p><b>自动备份</b>：设置窗口的“备份”页签，每天在数据有变化时生成一份完整 ZIP，保留最近几份，默认写入数据目录的 backups 文件夹；失败只在窗口底部提示。</p>
 <p><b>回顾</b>：导航栏“回顾”查看本月与今年的完成条数、完成率、有事项天数，以及当前与历史最长连续完成天数；下方是最近 12 个月热力图和今年早/午/晚的完成分布。连续天数只算“当天有事项且全部完成”。</p>
@@ -812,6 +849,10 @@ class CalendarApp(QMainWindow):
     def open_templates(self):
         from templates_ui import TemplatesDialog
         TemplatesDialog(self).exec()
+
+    def open_entry_times(self):
+        from entry_times_ui import EntryTimesDialog
+        EntryTimesDialog(self).exec()
 
     def reload_entries(self):
         """Re-read entry data after an import; ink, workspace and plugins are untouched."""
@@ -1145,6 +1186,14 @@ def main():
                    for row in window.day_entries.get(window.selected.isoformat(), []))
         assert not template_dialog.grab().isNull()
         template_dialog.close()
+        from entry_times_ui import EntryTimesDialog as _EntryTimesDialog
+        window.select(date.today())
+        times_dialog = _EntryTimesDialog(window)
+        if times_dialog.editors:
+            times_dialog.editors[0][1].setText('23:59')
+            times_dialog.save()
+            assert window.store.get('day:' + date.today().isoformat(), [])[0].get('time') == '23:59'
+        times_dialog.close()
         shop.close()
         settings.close()
         QTimer.singleShot(500, app.quit)

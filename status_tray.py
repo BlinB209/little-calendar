@@ -30,11 +30,14 @@ class StatusTray(QSystemTrayIcon):
         menu.addSeparator()
         pause = menu.addAction('暂停今天的提醒')
         pause.triggered.connect(lambda checked=False: self._run('pause'))
+        snooze = menu.addAction('稍后提醒（10 分钟）')
+        snooze.triggered.connect(lambda checked=False: self._run('snooze'))
         menu.addSeparator()
         quit_action = menu.addAction('退出小日历')
         quit_action.triggered.connect(lambda checked=False: self._run('quit'))
         self.setContextMenu(menu)
         self.activated.connect(self._activated)
+        self.messageClicked.connect(lambda: self._run('message_clicked'))
 
     def _run(self, key):
         callback = self._callbacks.get(key)

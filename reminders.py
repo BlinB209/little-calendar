@@ -4,7 +4,7 @@ Settings live in ``customization:v1`` (``reminder_*`` keys, normalized by
 preferences.py). Only the fired/paused marks live in ``reminder:v1``: losing
 that state must never lose user data, so a bad value just means "not fired".
 """
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 STATE_KEY = 'reminder:v1'
 
@@ -84,6 +84,19 @@ def load_state(store):
             except ValueError:
                 continue
             state[key] = item
+    fired = value.get('fired')
+    if isinstance(fired, list):
+        kept = [item for item in fired if isinstance(item, str)][-200:]
+        if kept:
+            state['fired'] = kept
+    snooze = value.get('snooze')
+    if isinstance(snooze, str):
+        try:
+            datetime.fromisoformat(snooze)
+        except ValueError:
+            pass
+        else:
+            state['snooze'] = snooze
     return state
 
 
@@ -98,6 +111,38 @@ def mark_fired(store, day=None):
     save_state(store, state)
 
 
+def add_fired(store, keys, day=None):
+    """Remember per-entry reminder keys already shown today (bounded, deduped)."""
+    from entry_times import prune
+    state = load_state(store)
+    merged = []
+    for item in list(state.get('fired', [])) + [key for key in keys if isinstance(key, str)]:
+        if item not in merged:
+            merged.append(item)
+    state['fired'] = prune(merged, day or date.today())
+    save_state(store, state)
+
+
+def snooze(store, minutes=10, now=None):
+    """Silence every reminder until now + minutes; returns the new state."""
+    now = now or datetime.now()
+    state = load_state(store)
+    state['snooze'] = (now + timedelta(minutes=max(1, int(minutes)))).isoformat(timespec='seconds')
+    save_state(store, state)
+    return state
+
+
+def snoozed(state, now):
+    value = (state or {}).get('snooze')
+    if not isinstance(value, str):
+        return False
+    try:
+        until = datetime.fromisoformat(value)
+    except ValueError:
+        return False
+    return now < until
+
+
 def pause_today(store, day=None):
     state = load_state(store)
     state['paused'] = (day or date.today()).isoformat()
@@ -106,7 +151,4 @@ def pause_today(store, day=None):
 
 def reset_due(store):
     """Forget today's marks so the next check may fire again (settings change)."""
-    state = load_state(store)
-    state.pop('last', None)
-    state.pop('paused', None)
-    save_state(store, state)
+    save_state(store, {})
