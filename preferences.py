@@ -13,7 +13,10 @@ DEFAULTS = dict(background_mode='solid', background_color='', gradient_color='#b
     rule='past', mark_color='', mark_width=2, mark_opacity=65,
     show_ink=True, show_stamps=True, show_auto=True,
     pen_width=4, pen_opacity=90, eraser_size=22, stamp='circle', stamp_text='重要',
-    recent_colors=[], favorite_colors=[])
+    recent_colors=[], favorite_colors=[],
+    reminder_enabled=False, reminder_minutes=20*60, reminder_weekdays_only=False,
+    reminder_skip_empty=True, close_action='quit',
+    backup_auto=False, backup_keep=7, backup_folder='')
 
 
 COLOR_KEYS = ('surface', 'text', 'secondary', 'muted', 'dim', 'accent', 'grid',
@@ -22,10 +25,12 @@ COLOR_KEYS = ('surface', 'text', 'secondary', 'muted', 'dim', 'accent', 'grid',
 CHOICES = dict(background_mode=('solid', 'gradient', 'image'),
     image_fit=('cover', 'contain', 'center', 'tile'),
     rule=('past', 'weekend', 'completed'),
-    stamp=('circle', 'box', 'cross', 'underline', 'fill', 'text'))
+    stamp=('circle', 'box', 'cross', 'underline', 'fill', 'text'),
+    close_action=('quit', 'tray'))
 RANGES = dict(overlay=(0, 95), cell_opacity=(10, 100), font_size=(10, 32),
     mark_width=(1, 12), mark_opacity=(10, 100), pen_width=(1, 40),
-    pen_opacity=(5, 100), eraser_size=(5, 80))
+    pen_opacity=(5, 100), eraser_size=(5, 80),
+    reminder_minutes=(0, 1439), backup_keep=(1, 30))
 
 
 def valid_color(value):
@@ -47,12 +52,15 @@ def normalize_preferences(saved):
         value = saved.get(key)
         if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value):
             result[key] = max(low, min(high, round(value)))
-    for key in ('font_auto', 'show_ink', 'show_stamps', 'show_auto'):
+    for key in ('font_auto', 'show_ink', 'show_stamps', 'show_auto',
+                'reminder_enabled', 'reminder_weekdays_only', 'reminder_skip_empty',
+                'backup_auto'):
         if isinstance(saved.get(key), bool):
             result[key] = saved[key]
     for key in ('background_color', 'gradient_color', 'mark_color'):
         result[key] = valid_color(saved.get(key)) or DEFAULTS[key]
-    for key, limit in (('font_family', 200), ('background_image', 4096), ('background_image_name', 255), ('stamp_text', 16)):
+    for key, limit in (('font_family', 200), ('background_image', 4096), ('background_image_name', 255),
+                       ('stamp_text', 16), ('backup_folder', 4096)):
         value = saved.get(key)
         if isinstance(value, str) and '\x00' not in value:
             result[key] = value[:limit]
@@ -211,7 +219,7 @@ class PreferencesDialog(QDialog):
         self.controls = {}
         self.color_controls = []
         self.preview_pixmap = load_background(self.values)
-        self.setWindowTitle('自定义外观与标记')
+        self.setWindowTitle('设置 · 外观、提醒与备份')
         available = self.screen().availableGeometry()
         self.resize(min(700, available.width() - 40), min(800, available.height() - 60))
         box = QVBoxLayout(self)
@@ -285,9 +293,58 @@ class PreferencesDialog(QDialog):
         self.check(marker_form,'显示日期印章','show_stamps')
         self.check(marker_form,'显示自动标记','show_auto')
         self.add_scroll_tab(tabs, markers, '标记与图层')
-        defaults = QPushButton('恢复默认外观和标记设置')
+        reminder = QWidget()
+        reminder_form = QFormLayout(reminder)
+        self.check(reminder_form, '每天提醒未完成事项', 'reminder_enabled')
+        time_row = QWidget()
+        time_box = QHBoxLayout(time_row)
+        time_box.setContentsMargins(0, 0, 0, 0)
+        self.reminder_hour = QSpinBox()
+        self.reminder_hour.setRange(0, 23)
+        self.reminder_hour.setSuffix(' 时')
+        self.reminder_minute = QSpinBox()
+        self.reminder_minute.setRange(0, 55)
+        self.reminder_minute.setSingleStep(5)
+        self.reminder_minute.setSuffix(' 分')
+        minutes = int(self.values.get('reminder_minutes', 20*60))
+        self.reminder_hour.setValue(minutes // 60)
+        self.reminder_minute.setValue(minutes % 60)
+        for spin in (self.reminder_hour, self.reminder_minute):
+            spin.valueChanged.connect(self.change_reminder_time)
+            time_box.addWidget(spin)
+        reminder_form.addRow('提醒时间', time_row)
+        self.check(reminder_form, '只在工作日提醒（周一至周五）', 'reminder_weekdays_only')
+        self.check(reminder_form, '当天没有未完成事项就不提醒', 'reminder_skip_empty')
+        self.combo(reminder_form, '关闭窗口时', 'close_action',
+                   [('退出程序', 'quit'), ('最小化到托盘，提醒继续', 'tray')])
+        reminder_hint = QLabel('提醒显示为系统托盘气泡；系统没有托盘时改在窗口底部提示。'
+                               '“最小化到托盘”需要系统托盘，不可用时自动退回退出程序。')
+        reminder_hint.setWordWrap(True)
+        reminder_form.addRow(reminder_hint)
+        self.add_scroll_tab(tabs, reminder, '提醒')
+        backup = QWidget()
+        backup_form = QFormLayout(backup)
+        self.check(backup_form, '每天自动备份一份（数据有变化时）', 'backup_auto')
+        self.spin(backup_form, '保留最近几份', 'backup_keep', 1, 30)
+        folder_row = QWidget()
+        folder_box = QHBoxLayout(folder_row)
+        folder_box.setContentsMargins(0, 0, 0, 0)
+        self.backup_folder = QLineEdit(self.values.get('backup_folder', ''))
+        self.backup_folder.setPlaceholderText('留空 = 数据目录下的 backups 文件夹')
+        self.backup_folder.textChanged.connect(lambda text: self.set_value('backup_folder', text))
+        choose_folder = QPushButton('选择文件夹…')
+        choose_folder.clicked.connect(self.choose_backup_folder)
+        folder_box.addWidget(self.backup_folder, 1)
+        folder_box.addWidget(choose_folder)
+        backup_form.addRow('备份位置', folder_row)
+        backup_hint = QLabel('自动备份是完整 ZIP（事项、笔迹、布局、背景、插件与数据）；'
+                             '不包含之前的 recovery 或 auto 备份，避免嵌套。失败只提示，不影响使用。')
+        backup_hint.setWordWrap(True)
+        backup_form.addRow(backup_hint)
+        self.add_scroll_tab(tabs, backup, '备份')
+        defaults = QPushButton('恢复全部默认设置')
         def reset():
-            if QMessageBox.question(self,'恢复默认','恢复默认自定义设置？日历事项、模块内容和已有标记保留。') == QMessageBox.StandardButton.Yes:
+            if QMessageBox.question(self,'恢复默认','恢复外观、标记、提醒与备份的默认设置？日历事项、模块内容和已有标记保留。') == QMessageBox.StandardButton.Yes:
                 self.values = copy.deepcopy(DEFAULTS)
                 self.preview_pixmap = QPixmap()
                 self.sync_controls()
@@ -311,6 +368,15 @@ class PreferencesDialog(QDialog):
     def set_value(self, key, value):
         self.values[key] = value
         self.refresh_preview()
+
+    def change_reminder_time(self, *_args):
+        self.set_value('reminder_minutes', self.reminder_hour.value()*60 + self.reminder_minute.value())
+
+    def choose_backup_folder(self):
+        current = self.backup_folder.text().strip() or str(Path.home())
+        path = QFileDialog.getExistingDirectory(self, '选择自动备份文件夹', current)
+        if path:
+            self.backup_folder.setText(path)
 
     def refresh_preview(self):
         if not hasattr(self, 'image_label'):
@@ -347,6 +413,16 @@ class PreferencesDialog(QDialog):
         for button, key, fallback, override in self.color_controls:
             values = self.values['overrides'] if override else self.values
             button.setText(values.get(key) or fallback)
+        if hasattr(self, 'reminder_hour'):
+            minutes = int(self.values.get('reminder_minutes', 20*60))
+            for widget, value in ((self.reminder_hour, minutes // 60), (self.reminder_minute, minutes % 60)):
+                widget.blockSignals(True)
+                widget.setValue(value)
+                widget.blockSignals(False)
+        if hasattr(self, 'backup_folder'):
+            self.backup_folder.blockSignals(True)
+            self.backup_folder.setText(self.values.get('backup_folder', ''))
+            self.backup_folder.blockSignals(False)
         self.refresh_preview()
 
     def clear_image(self):
@@ -357,6 +433,10 @@ class PreferencesDialog(QDialog):
     def accept(self):
         if self.values['background_mode'] == 'image' and self.preview_pixmap.isNull():
             QMessageBox.warning(self, '请选择背景图片', '尚未选择可用的图片。请点击“选择本地图片”，或将背景类型改为纯色或渐变。')
+            return
+        folder = str(self.values.get('backup_folder') or '').strip()
+        if folder and Path(folder).exists() and not Path(folder).is_dir():
+            QMessageBox.warning(self, '备份位置无效', '自动备份需要选择一个文件夹，而不是文件。')
             return
         super().accept()
 

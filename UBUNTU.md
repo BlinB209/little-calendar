@@ -4,11 +4,11 @@
 
 ## 安装
 
-将 `little-calendar_0.7.0_all.deb` 复制到 Ubuntu，在该文件所在目录打开终端：
+将 `little-calendar_0.8.0_all.deb` 复制到 Ubuntu，在该文件所在目录打开终端：
 
 ```sh
 sudo apt update
-sudo apt install ./little-calendar_0.7.0_all.deb
+sudo apt install ./little-calendar_0.8.0_all.deb
 ```
 
 首次安装需要联网，apt 会安装 Python、Qt 和 Noto 中文字体。若找不到 python3-pyqt6，请先启用 Ubuntu universe 软件源：
@@ -16,7 +16,7 @@ sudo apt install ./little-calendar_0.7.0_all.deb
 ```sh
 sudo add-apt-repository universe
 sudo apt update
-sudo apt install ./little-calendar_0.7.0_all.deb
+sudo apt install ./little-calendar_0.8.0_all.deb
 ```
 
 安装后在应用菜单搜索“小日历”或“Little Calendar”，也可在终端运行 `little-calendar`。
@@ -38,6 +38,8 @@ sudo apt remove little-calendar
 ## 验证状态
 
 本机构建会校验 Debian 包结构、目录条目、依赖声明、文件内容和启动脚本权限。当前本机为 Windows，没有 Ubuntu 桌面环境；人工桌面运行测试尚待完成。远端安装检查见下面的 Actions 流程。
+
+**托盘与提醒**：GNOME 默认不显示传统托盘图标，需要安装 AppIndicator 类扩展才会出现。没有托盘时提醒改在窗口底部提示，“关闭窗口时”的“最小化到托盘”也会自动退回退出程序，不会出现窗口消失却仍在后台运行的情况。
 
 仓库新增 Ubuntu 24.04 Actions 检查：安装系统 Qt 依赖、运行跨平台测试、构建并 apt 安装 DEB，执行无界面启动检查。具体是否通过以对应提交的 Actions 结果为准；无界面检查不等于人工桌面体验验证。
 

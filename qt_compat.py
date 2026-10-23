@@ -8,7 +8,7 @@ if sys.platform == 'linux':
         QCheckBox, QLineEdit, QTextEdit, QPlainTextEdit, QListWidget,
         QListWidgetItem, QSpinBox, QColorDialog, QFileDialog, QMessageBox,
         QDialogButtonBox, QTabWidget, QFontComboBox, QCalendarWidget, QMenu,
-        QScrollArea)
+        QScrollArea, QSystemTrayIcon, QStyle)
 else:
     from PySide6.QtCore import Qt, QTimer, QByteArray, QDate, QRectF, QPointF
     from PySide6.QtGui import QColor, QFont, QPainter, QPixmap, QLinearGradient, QImageReader
@@ -17,4 +17,4 @@ else:
         QCheckBox, QLineEdit, QTextEdit, QPlainTextEdit, QListWidget,
         QListWidgetItem, QSpinBox, QColorDialog, QFileDialog, QMessageBox,
         QDialogButtonBox, QTabWidget, QFontComboBox, QCalendarWidget, QMenu,
-        QScrollArea)
+        QScrollArea, QSystemTrayIcon, QStyle)

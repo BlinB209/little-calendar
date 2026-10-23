@@ -53,7 +53,7 @@ def build():
     for filename in ('qt_compat.py','workspace.py','free_canvas.py','module_shop.py','preferences.py','markings.py',
                      'module_appearance.py','plugin_library_ui.py','plugin_runtime.py','calendar_plugin_api.py',
                      'version.py','backup.py','backup_ui.py','layout_history.py','exchange.py','exchange_ui.py',
-                     'entry_search.py'):
+                     'entry_search.py','reminders.py','autobackup.py','status_tray.py'):
         files.append(('usr/share/little-calendar/'+filename,(ROOT/filename).read_bytes(),0o644))
     for filename in ('manifest.json','main.py','helpers.py','README.md'):
         relative = 'examples/python-note/' + filename

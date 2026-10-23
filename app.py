@@ -1,10 +1,10 @@
-import sys
+﻿import sys
 import os
 import json
 import sqlite3
 import copy
 import math
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from theme import colors, stylesheet
 from version import VERSION
@@ -339,6 +339,9 @@ class CalendarApp(QMainWindow):
     def __init__(self, store=None):
         super().__init__()
         self.store = store or Store()
+        self.tray = None
+        self._quitting = False
+        self._reminder_slot = None
         self.custom = preferences(self.store)
         self.background_pixmap = load_background(self.custom)
         self.calendar_surface = self.store.get('module-color:main-calendar','')
@@ -557,6 +560,73 @@ class CalendarApp(QMainWindow):
         self.body.restore_workspace()
         self.apply_customization()
         self.refresh_color_list()
+        self.apply_tray_settings()
+        self.schedule_auto_backup()
+
+    def apply_tray_settings(self):
+        """Create/show or hide the tray icon; a missing tray simply degrades."""
+        from status_tray import StatusTray, available as tray_available
+        want = bool(self.custom.get('reminder_enabled') or self.custom.get('close_action') == 'tray')
+        if want and self.tray is None and tray_available():
+            try:
+                self.tray = StatusTray(self, dict(show=self.show_window, today=self.go_today,
+                                                  search=self.open_search, backup=self.open_backup,
+                                                  pause=self.pause_reminder, quit=self.quit_app))
+            except Exception:
+                self.tray = None
+        if self.tray is not None:
+            try:
+                self.tray.setVisible(bool(want) and tray_available())
+            except Exception:
+                pass
+
+    def show_window(self):
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+
+    def quit_app(self):
+        self._quitting = True
+        self.close()
+
+    def pause_reminder(self):
+        from reminders import pause_today
+        pause_today(self.store, date.today())
+        self.status.setText('今天不再提醒，明天按设置继续。')
+
+    def check_reminder(self, now=None):
+        """Fire at most one reminder per minute slot and per day."""
+        from reminders import due, load_state, mark_fired, summary
+        now = now or datetime.now()
+        slot = now.strftime('%Y%m%d%H%M')
+        if slot == self._reminder_slot:
+            return False
+        self._reminder_slot = slot
+        count, text = summary(self.day_entries, now.date())
+        if not due(self.custom, load_state(self.store), now, count > 0):
+            return False
+        title = f'今天还有 {count} 件未完成' if count else '今天没有未完成的事项'
+        shown = bool(self.tray is not None and self.tray.isVisible() and self.tray.notify(title, text))
+        if not shown:
+            self.status.setText('提醒：' + title + (f' · {text}' if text else ''))
+        mark_fired(self.store, now.date())
+        return True
+
+    def schedule_auto_backup(self):
+        QTimer.singleShot(30000, self.run_auto_backup)
+
+    def run_auto_backup(self):
+        try:
+            from autobackup import run as run_backup
+            report = run_backup(self.store, self.custom)
+        except Exception as error:
+            self.status.setText('自动备份未完成：' + str(error))
+            return None
+        if report.get('created'):
+            self.status.setText('已自动备份：' + Path(report['created']).name)
+        elif report.get('error'):
+            self.status.setText('自动备份未完成：' + report['error'])
+        return report
 
     def enable_tool(self):
         if not self.draw_mode:
@@ -589,6 +659,8 @@ class CalendarApp(QMainWindow):
 <p><b>背景透明、文字清晰</b>：降低“仅底色不透明度”，保持“模块不透明度”为 100%，即可让背景透明而保留文字。第三方插件自绘内容由插件控制。</p>
 <p><b>备份与恢复</b>：顶部“备份与恢复”可导出整套 ZIP 备份，包含背景与插件数据。恢复会先备份原数据，再替换当前内容；恢复后的 Python 插件需要重新确认启用。</p>
 <p><b>导入导出</b>：顶部“导入导出”把事项导出为 .ics 日历文件或 .csv 表格。从 .csv 导入只新增、不删除，按日期+时段+文字去重，每日最多六条，逐行报告跳过原因，并自动备份原数据。</p>
+<p><b>提醒与托盘</b>：设置窗口的“提醒”页签，选择提醒时间与是否只在工作日提醒；到点用托盘气泡提示当天未完成的事项，没有未完成就不打扰。托盘菜单可显示窗口、搜索、备份、暂停今天的提醒或退出；“关闭窗口时”可选退出或最小化到托盘，系统没有托盘时自动退回退出。</p>
+<p><b>自动备份</b>：设置窗口的“备份”页签，每天在数据有变化时生成一份完整 ZIP，保留最近几份，默认写入数据目录的 backups 文件夹；失败只在窗口底部提示。</p>
 <p><b>搜索事项</b>：导航栏“搜索事项”（Ctrl+F）跨全部日期查找，可按早/午/晚和“只看未完成”过滤，双击结果跳到该日期。</p>
 <p><b>第三方插件</b>：进入“配件商店 → 第三方插件”，导入 ZIP 或 manifest.json，确认信任后启用，再添加到桌面。“保存可编辑示例”提供 Python 模板；打开源码目录修改后可重新加载。插件拥有本机用户权限。</p>
 <p><b>每日事项</b>：在选日期模式点击日期，填写最多六条事项，早/午/晚可自由选择，文字自动保存。左侧勾选表示完成。</p>
@@ -629,6 +701,7 @@ class CalendarApp(QMainWindow):
             self.background_pixmap = load_background(self.custom)
             self.change_theme(self.dark,save=False)
             self.centralWidget().update()
+            self.apply_tray_settings()
 
     def apply_customization(self):
         QApplication.instance().setProperty('calendarCustom',self.custom)
@@ -737,6 +810,15 @@ class CalendarApp(QMainWindow):
             months=self.month_splitter.sizes()))
 
     def closeEvent(self, event):
+        tray_ready = self.tray is not None and self.tray.isVisible()
+        if (not getattr(self,'_quitting',False) and tray_ready
+                and self.custom.get('close_action') == 'tray'):
+            # Keep reminders alive in the tray; the quit action still exits fully.
+            if not getattr(self,'_skip_save',False):
+                self.save_session()
+            self.hide()
+            event.ignore()
+            return
         if not getattr(self,'_skip_save',False):
             self.save_session()
         self.body.shutdown_plugins()
@@ -782,6 +864,7 @@ class CalendarApp(QMainWindow):
                 self.sync_navigation()
             for b in self.boards:
                 b.update()
+        self.check_reminder()
 
     def rebuild(self, *_):
         previous_sizes = self.month_splitter.sizes() if hasattr(self, 'month_splitter') else []
@@ -1012,6 +1095,21 @@ def main():
         window.reload_entries()
         assert window.day_entries[upcoming][0]['text'] == '来自表格'
         exchange_dialog.close()
+        from preferences import PreferencesDialog as _PreferencesDialog
+        prefs = _PreferencesDialog(window)
+        prefs.reminder_hour.setValue(6)
+        assert prefs.values['reminder_minutes'] == 6*60 + prefs.reminder_minute.value()
+        prefs.close()
+        window.custom.update(reminder_enabled=True, reminder_minutes=0, reminder_skip_empty=False)
+        assert window.check_reminder(datetime.combine(date.today(), datetime(2000, 1, 1).time())) is True
+        assert '提醒' in window.status.text()
+        window.custom.update(reminder_enabled=False)
+        window.custom['close_action'] = 'tray'
+        window.apply_tray_settings()
+        window.custom['close_action'] = 'quit'
+        assert window.run_auto_backup()['skipped'] is True
+        window.custom.update(backup_auto=True, backup_keep=2)
+        assert window.run_auto_backup()['created']
         shop.close()
         settings.close()
         QTimer.singleShot(500, app.quit)
