@@ -1,4 +1,4 @@
-﻿import sys
+import sys
 import os
 import json
 import sqlite3
@@ -432,6 +432,7 @@ class CalendarApp(QMainWindow):
         self.cross_style.currentIndexChanged.connect(self.save_cross_style)
         bar.addWidget(self.cross_style)
         self.button('搜索事项',self.open_search,bar).setToolTip('在全部日期中搜索事项并跳转（Ctrl+F）')
+        self.button('回顾',self.open_review,bar).setToolTip('本月与今年的完成情况、连续天数与最近 12 个月热力图')
         bar.addStretch()
         self.orientation = QComboBox()
         self.orientation.addItems(['纵向排列', '横向排列'])
@@ -494,7 +495,14 @@ class CalendarApp(QMainWindow):
         self.day_label.setStyleSheet('font-weight:600;')
         self.day_label.setProperty('largeText', True)
         editor.addWidget(self.day_label)
-        editor.addWidget(QLabel('当天事项 · 最多六条'))
+        day_row = QHBoxLayout()
+        day_row.addWidget(QLabel('当天事项 · 最多六条'))
+        day_row.addStretch()
+        self.template_button = QPushButton('模板…')
+        self.template_button.setToolTip('把常用事项存成模板，一键插入这一天')
+        self.template_button.clicked.connect(self.open_templates)
+        day_row.addWidget(self.template_button)
+        editor.addLayout(day_row)
         editor.addSpacing(14)
         self.rows = []
         for i in range(6):
@@ -661,6 +669,8 @@ class CalendarApp(QMainWindow):
 <p><b>导入导出</b>：顶部“导入导出”把事项导出为 .ics 日历文件或 .csv 表格。从 .csv 导入只新增、不删除，按日期+时段+文字去重，每日最多六条，逐行报告跳过原因，并自动备份原数据。</p>
 <p><b>提醒与托盘</b>：设置窗口的“提醒”页签，选择提醒时间与是否只在工作日提醒；到点用托盘气泡提示当天未完成的事项，没有未完成就不打扰。托盘菜单可显示窗口、搜索、备份、暂停今天的提醒或退出；“关闭窗口时”可选退出或最小化到托盘，系统没有托盘时自动退回退出。</p>
 <p><b>自动备份</b>：设置窗口的“备份”页签，每天在数据有变化时生成一份完整 ZIP，保留最近几份，默认写入数据目录的 backups 文件夹；失败只在窗口底部提示。</p>
+<p><b>回顾</b>：导航栏“回顾”查看本月与今年的完成条数、完成率、有事项天数，以及当前与历史最长连续完成天数；下方是最近 12 个月热力图和今年早/午/晚的完成分布。连续天数只算“当天有事项且全部完成”。</p>
+<p><b>事项模板</b>：编辑面板“模板…”把常用事项存起来（最多 30 条），选中日期后一键插入；同一天已有相同事项或已满六条会拒绝，不会覆盖已有内容。</p>
 <p><b>搜索事项</b>：导航栏“搜索事项”（Ctrl+F）跨全部日期查找，可按早/午/晚和“只看未完成”过滤，双击结果跳到该日期。</p>
 <p><b>第三方插件</b>：进入“配件商店 → 第三方插件”，导入 ZIP 或 manifest.json，确认信任后启用，再添加到桌面。“保存可编辑示例”提供 Python 模板；打开源码目录修改后可重新加载。插件拥有本机用户权限。</p>
 <p><b>每日事项</b>：在选日期模式点击日期，填写最多六条事项，早/午/晚可自由选择，文字自动保存。左侧勾选表示完成。</p>
@@ -794,6 +804,14 @@ class CalendarApp(QMainWindow):
     def open_search(self):
         from entry_search import SearchDialog
         SearchDialog(self).exec()
+
+    def open_review(self):
+        from review_ui import ReviewDialog
+        ReviewDialog(self).exec()
+
+    def open_templates(self):
+        from templates_ui import TemplatesDialog
+        TemplatesDialog(self).exec()
 
     def reload_entries(self):
         """Re-read entry data after an import; ink, workspace and plugins are untouched."""
@@ -1110,6 +1128,23 @@ def main():
         assert window.run_auto_backup()['skipped'] is True
         window.custom.update(backup_auto=True, backup_keep=2)
         assert window.run_auto_backup()['created']
+        from review_ui import ReviewDialog as _ReviewDialog
+        review_dialog = _ReviewDialog(window)
+        review_dialog.show()
+        app.processEvents()
+        assert not review_dialog.grab().isNull() and review_dialog.data['month']['entries'] >= 0
+        review_dialog.close()
+        from templates_ui import TemplatesDialog as _TemplatesDialog
+        template_dialog = _TemplatesDialog(window)
+        template_dialog.show()
+        template_dialog.input.setText('打包检查模板')
+        template_dialog.period.setCurrentIndex(0)
+        template_dialog.add_current()
+        template_dialog.insert_selected()
+        assert any(row.get('text') == '打包检查模板'
+                   for row in window.day_entries.get(window.selected.isoformat(), []))
+        assert not template_dialog.grab().isNull()
+        template_dialog.close()
         shop.close()
         settings.close()
         QTimer.singleShot(500, app.quit)

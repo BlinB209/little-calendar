@@ -1,14 +1,14 @@
-# 小日历 Ubuntu 安装说明
+﻿# 小日历 Ubuntu 安装说明
 
 目标系统：Ubuntu 24.04 LTS 桌面版。使用系统 Python 3 和 PyQt6，包架构为 all，可用于提供这些依赖的 amd64 / arm64 系统。Ubuntu 22.04 的默认软件源缺少 python3-pyqt6，因此本 DEB 不再宣称支持 22.04；请升级到 24.04 后安装。
 
 ## 安装
 
-将 `little-calendar_0.8.0_all.deb` 复制到 Ubuntu，在该文件所在目录打开终端：
+将 `little-calendar_0.9.0_all.deb` 复制到 Ubuntu，在该文件所在目录打开终端：
 
 ```sh
 sudo apt update
-sudo apt install ./little-calendar_0.8.0_all.deb
+sudo apt install ./little-calendar_0.9.0_all.deb
 ```
 
 首次安装需要联网，apt 会安装 Python、Qt 和 Noto 中文字体。若找不到 python3-pyqt6，请先启用 Ubuntu universe 软件源：
@@ -16,7 +16,7 @@ sudo apt install ./little-calendar_0.8.0_all.deb
 ```sh
 sudo add-apt-repository universe
 sudo apt update
-sudo apt install ./little-calendar_0.8.0_all.deb
+sudo apt install ./little-calendar_0.9.0_all.deb
 ```
 
 安装后在应用菜单搜索“小日历”或“Little Calendar”，也可在终端运行 `little-calendar`。
