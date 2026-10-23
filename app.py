@@ -383,6 +383,8 @@ class CalendarApp(QMainWindow):
         snap.setCheckable(True)
         snap.setChecked(bool(self.store.get('workspace:snap',True)))
         snap.toggled.connect(lambda value:self.body.set_snap(value))
+        arrange_menu.addSeparator()
+        arrange_menu.addAction('桌面方案…',lambda:self.open_schemes())
         arrange.setMenu(arrange_menu)
         self.layout_lock = QCheckBox('锁定位置')
         self.layout_lock.setToolTip('锁定后配件不能拖动或缩放，仍可编辑内容')
@@ -862,6 +864,10 @@ class CalendarApp(QMainWindow):
         from entry_move_ui import MoveDialog
         MoveDialog(self).exec()
 
+    def open_schemes(self):
+        from schemes_ui import SchemesDialog
+        SchemesDialog(self.body).exec()
+
     def reload_entries(self):
         """Re-read entry data after an import; ink, workspace and plugins are untouched."""
         self.day_entries = self.store.load_days()
@@ -1221,6 +1227,13 @@ def main():
         move_dialog.save()
         assert move_dialog.report and move_dialog.report['moved'], move_dialog.report
         move_dialog.close()
+        from schemes_ui import SchemesDialog as _SchemesDialog
+        import schemes as _schemes
+        schemes_dialog = _SchemesDialog(window.body)
+        schemes_dialog.input.setText('打包检查方案')
+        schemes_dialog.create_new()
+        assert '打包检查方案' in _schemes.load(window.store)
+        schemes_dialog.close()
         shop.close()
         settings.close()
         QTimer.singleShot(500, app.quit)

@@ -659,6 +659,49 @@ class Workspace(QMainWindow):
         panels = {key:dict(rect=[p.x(),p.y(),p.width(),p.height()],visible=not p.isHidden()) for key,p in self.docks.items()}
         self.owner.persist('workspace:free:v1',dict(panels=panels,order=self.order,auto=self.auto_layout))
 
+    def save_scheme(self,name):
+        """Store the current arrangement under a name and make it the active scheme."""
+        from schemes import LIMIT, load, save, set_current, snapshot
+        name = str(name).strip()[:20]
+        if not name:
+            raise ValueError('方案名不能为空')
+        values = load(self.owner.store)
+        if name not in values and len(values) >= LIMIT:
+            raise ValueError(f'最多保存 {LIMIT} 套桌面方案')
+        values[name] = snapshot(self)
+        save(self.owner.store, values)
+        set_current(self.owner.store, name)
+        self.save_workspace()
+        return name
+
+    def switch_scheme(self,name):
+        """Persist the current arrangement first, then apply the requested one."""
+        from schemes import apply, current, load, save, set_current, snapshot
+        values = load(self.owner.store)
+        target = values.get(name)
+        if target is None:
+            raise ValueError('方案不存在')
+        values[current(self.owner.store)] = snapshot(self)
+        save(self.owner.store, values)
+        set_current(self.owner.store, name)
+        apply(self, target)
+        self.save_workspace()
+
+    def delete_scheme(self,name):
+        from schemes import DEFAULT_NAME, apply, current, load, save, set_current, snapshot
+        values = load(self.owner.store)
+        if name not in values:
+            raise ValueError('方案不存在')
+        del values[name]
+        if not values:
+            values[DEFAULT_NAME] = snapshot(self)
+        save(self.owner.store, values)
+        if current(self.owner.store) == name:
+            fallback = DEFAULT_NAME if DEFAULT_NAME in values else next(iter(values))
+            set_current(self.owner.store, fallback)
+            apply(self, values[fallback])
+        self.save_workspace()
+
     def reset_layout(self):
         for key in self.docks:
             record = next((r for r in self.records if r['id'] == key),None)
