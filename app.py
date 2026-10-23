@@ -498,14 +498,18 @@ class CalendarApp(QMainWindow):
         day_row = QHBoxLayout()
         day_row.addWidget(QLabel('当天事项 · 最多六条'))
         day_row.addStretch()
-        self.template_button = QPushButton('模板…')
+        self.template_button = QPushButton('模板')
         self.template_button.setToolTip('把常用事项存成模板，一键插入这一天')
         self.template_button.clicked.connect(self.open_templates)
         day_row.addWidget(self.template_button)
-        self.times_button = QPushButton('定时…')
+        self.times_button = QPushButton('定时')
         self.times_button.setToolTip('给当天的事项设置提醒时间（HH:MM）')
         self.times_button.clicked.connect(self.open_entry_times)
         day_row.addWidget(self.times_button)
+        self.move_button = QPushButton('移动')
+        self.move_button.setToolTip('把当天的事项移动或复制到另一个日期')
+        self.move_button.clicked.connect(self.open_entry_move)
+        day_row.addWidget(self.move_button)
         editor.addLayout(day_row)
         editor.addSpacing(14)
         self.rows = []
@@ -853,6 +857,10 @@ class CalendarApp(QMainWindow):
     def open_entry_times(self):
         from entry_times_ui import EntryTimesDialog
         EntryTimesDialog(self).exec()
+
+    def open_entry_move(self):
+        from entry_move_ui import MoveDialog
+        MoveDialog(self).exec()
 
     def reload_entries(self):
         """Re-read entry data after an import; ink, workspace and plugins are untouched."""
@@ -1206,6 +1214,13 @@ def main():
         assert repeat_dialog.report and len(repeat_dialog.report['added']) == 2, repeat_dialog.report
         repeat_dialog.close()
         repeat_source.close()
+        from entry_move_ui import MoveDialog as _MoveDialog
+        window.select(date.today())
+        move_dialog = _MoveDialog(window)
+        move_dialog.mode.setCurrentIndex(move_dialog.mode.findData('copy'))
+        move_dialog.save()
+        assert move_dialog.report and move_dialog.report['moved'], move_dialog.report
+        move_dialog.close()
         shop.close()
         settings.close()
         QTimer.singleShot(500, app.quit)
