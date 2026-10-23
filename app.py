@@ -1194,6 +1194,18 @@ def main():
             times_dialog.save()
             assert window.store.get('day:' + date.today().isoformat(), [])[0].get('time') == '23:59'
         times_dialog.close()
+        from recurrence_ui import RepeatDialog as _RepeatDialog
+        repeat_source = _TemplatesDialog(window)
+        repeat_source.input.setText('重复检查')
+        repeat_source.period.setCurrentIndex(0)
+        repeat_source.add_current()
+        repeat_source.list.setCurrentRow(max(0, repeat_source.list.count() - 1))
+        repeat_dialog = _RepeatDialog(window, repeat_source.selected())
+        repeat_dialog.times.setValue(2)
+        repeat_dialog.save()
+        assert repeat_dialog.report and len(repeat_dialog.report['added']) == 2, repeat_dialog.report
+        repeat_dialog.close()
+        repeat_source.close()
         shop.close()
         settings.close()
         QTimer.singleShot(500, app.quit)

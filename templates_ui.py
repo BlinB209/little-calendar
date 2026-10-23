@@ -1,6 +1,7 @@
 """Templates dialog: save frequently used entries and insert one into a day."""
 from qt_compat import (Qt, QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
                        QComboBox, QPushButton, QListWidget, QListWidgetItem)
+import recurrence
 import templates
 
 
@@ -39,6 +40,9 @@ class TemplatesDialog(QDialog):
         insert.setProperty('primary', True)
         insert.clicked.connect(self.insert_selected)
         actions.addWidget(insert)
+        repeat = QPushButton('重复插入…')
+        repeat.clicked.connect(self.repeat_selected)
+        actions.addWidget(repeat)
         remove = QPushButton('删除选中模板')
         remove.clicked.connect(self.remove_selected)
         actions.addWidget(remove)
@@ -94,6 +98,17 @@ class TemplatesDialog(QDialog):
         self.owner.reload_entries()
         self.status.setText(f"已插入“{template['text']}”到 {self.owner.selected.isoformat()}。")
         self.refresh(select=template)
+
+    def repeat_selected(self):
+        template = self.selected()
+        if template is None:
+            self.status.setText('先选择一个模板。')
+            return
+        from recurrence_ui import RepeatDialog
+        dialog = RepeatDialog(self.owner, template)
+        if dialog.exec() == QDialog.DialogCode.Accepted and dialog.report:
+            self.status.setText(recurrence.summary(dialog.report))
+            self.refresh(select=template)
 
     def remove_selected(self):
         row = self.list.currentRow()

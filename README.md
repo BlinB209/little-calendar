@@ -9,7 +9,7 @@ Windows：双击 `小日历-v0.10.0.exe` 即可运行，不需要安装 Python�
 - **回顾**：导航栏“回顾”打开本月与今年的完成条数、完成率、有事项天数，当前与历史最长连续完成天数，最近 12 个月热力图，以及今年早/午/晚的完成分布。连续天数只统计“当天有事项且全部完成”的日子。
 - **事项模板**：编辑面板“模板…”把常用事项存成模板（最多 30 条），选中日期后一键插入；同一天已有相同事项或已满六条会拒绝，不会覆盖已有内容。
 - **定时提醒**：编辑面板“定时…”给当天事项设置 HH:MM 提醒时间（留空不提醒）。到点用托盘气泡提醒，点击气泡跳到今天；同分钟多条合并成一条，错过时间会在下次打开后补提醒；托盘菜单可“稍后提醒（10 分钟）”。
-- **每日提醒**：顶部“背景与外观”→ 设置窗口的“提醒”页签，选择提醒时间和是否只在工作日提醒；到点用系统托盘气泡提示当天未完成的事项，当天没有未完成就不打扰。系统没有托盘时改在窗口底部提示。
+- **重复插入**：在“模板…”里选中模板后点“重复插入…”，可按每天、每周同一天或每月同一天写入若干天（最多 52 次）；只新增，重复或已满六条的日期会逐条报告跳过。`n- **每日提醒**：顶部“背景与外观”→ 设置窗口的“提醒”页签，选择提醒时间和是否只在工作日提醒；到点用系统托盘气泡提示当天未完成的事项，当天没有未完成就不打扰。系统没有托盘时改在窗口底部提示。
 - **托盘常驻**：托盘菜单可显示窗口、跳到今天、搜索事项、备份与恢复、暂停今天的提醒、退出；双击图标回到窗口。“关闭窗口时”可选退出程序或最小化到托盘，托盘不可用时自动退回退出。
 - **自动备份**：设置窗口的“备份”页签，每天在数据有变化时自动生成一份完整 ZIP，保留最近几份（默认 7，可改 1–30），也可另选文件夹；默认写入数据目录的 `backups/`。失败只在窗口底部提示，不影响正常使用。
 
@@ -67,4 +67,4 @@ Ubuntu 打包：`python build_ubuntu.py`。此包不含本机二进制，依赖�
 
 Windows 功能检查：`verify.py`、`verify_preview.py`、`verify_layout.py`、`verify_background.py`、`verify_shop.py` 使用临时数据库及 PySide6。插件检查见 `verify_python_plugins.py`、`verify_plugin_library_ui.py`；外观检查见 `verify_module_appearance.py`、`verify_appearance_integration.py`。打包后的 `--smoke-test` 还检查图片解码、商店、外观设置，以及示例插件的导出、导入、动态加载、数据隔离和停用恢复，不改动个人数据。
 
-执行 `python verify_all.py` 运行本平台检查，`verify_backup.py` 验证真实窗口恢复、路径迁移、拒绝损坏包和失败回滚；`verify_exchange.py` 验证 ICS 折行/转义/往返、CSV 顺序、合并导入、每日上限与全部拒绝分支；`verify_search.py` 验证检索排序、过滤与跳转；`verify_reminder.py` 验证提醒规则、工作日/空日/暂停与零 SQL 节流；`verify_autobackup.py` 验证变更检测、24 小时间隔、轮转上限、备份内容隔离与失败隔离；`verify_tray.py` 验证托盘菜单、关闭到托盘与无托盘降级；`verify_entry_times.py` 验证时间解析、补提醒、去重与稍后提醒；`verify_review.py` 验证月/年统计、严格连续天数、12 个月窗口与零 SQL 绘制；`verify_templates.py` 验证模板归并、插入去重/上限与对话框路径；`verify_stability.py` 验证布局历史（含跨重启）、找回和吸附。主窗口与构建共享 `version.py`。自动构建、标签发布与 Release 草稿流程见 [RELEASING.md](RELEASING.md)。
+执行 `python verify_all.py` 运行本平台检查，`verify_backup.py` 验证真实窗口恢复、路径迁移、拒绝损坏包和失败回滚；`verify_exchange.py` 验证 ICS 折行/转义/往返、CSV 顺序、合并导入、每日上限与全部拒绝分支；`verify_search.py` 验证检索排序、过滤与跳转；`verify_reminder.py` 验证提醒规则、工作日/空日/暂停与零 SQL 节流；`verify_autobackup.py` 验证变更检测、24 小时间隔、轮转上限、备份内容隔离与失败隔离；`verify_tray.py` 验证托盘菜单、关闭到托盘与无托盘降级；`verify_entry_times.py` 验证时间解析、补提醒、去重与稍后提醒；`verify_review.py` 验证月/年统计、严格连续天数、12 个月窗口与零 SQL 绘制；`verify_templates.py` 验证模板归并；`verify_recurrence.py` 验证每天/每周/每月规则、短月与闰日、批量写入与拒绝分支、插入去重/上限与对话框路径；`verify_stability.py` 验证布局历史（含跨重启）、找回和吸附。主窗口与构建共享 `version.py`。自动构建、标签发布与 Release 草稿流程见 [RELEASING.md](RELEASING.md)。
