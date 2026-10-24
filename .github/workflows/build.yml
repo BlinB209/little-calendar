@@ -22,7 +22,8 @@ jobs:
           python verify_all.py 2>&1 | Tee-Object -FilePath verify.log
           $code = $LASTEXITCODE
           if ($code -ne 0) {
-            Get-Content verify.log -Tail 80 | ForEach-Object { "::error::$_" }
+            $tail = (Get-Content verify.log -Tail 30) -join ' | '
+            Write-Output "::error title=verify_all failed::$tail"
             exit $code
           }
       - run: python build_windows.py
