@@ -12,7 +12,9 @@ settings = dict(backup_auto=True, backup_keep=3, backup_folder='')
 now = datetime(2026, 10, 23, 12, 0)
 
 with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as folder:
-    root = Path(folder)
+    # Resolve the temporary directory: Windows CI hands out an 8.3 short name
+    # (RUNNER~1), while the app stores canonical long paths.
+    root = Path(folder).resolve()
     store = Store(root / 'calendar.sqlite3')
     store.put('day:2026-10-23', [dict(done=False, period='早', text='交作业')])
     first_signature = signature(store)
